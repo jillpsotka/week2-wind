@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 
-def make_dates(start_date="2012-11-25" ,number=1, max=30):
+def make_dates(start_date="2012-11-25" ,number=1, max=31):
     # make __ pandas date ranges with max size 30 days
     dates = []
     start_date = datetime.strptime(start_date, '%Y-%m-%d')
@@ -25,12 +25,12 @@ def get_z(period):
     tic = time.perf_counter()
     H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="hgt_pres_abv700mb")
     toc = time.perf_counter()
-    print(f"finished FastHerbie in {toc - tic:0.4f} seconds. Now putting into xarray...")
+    print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray: takes ~15 minutes per month, look into cutting more?
     ds = H.xarray(":500 mb:")
     toc2 = time.perf_counter()
-    print(f"finished xarray in {(toc2 - toc)/60:0.4f} minutes. Now clipping and saving...")
+    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now clipping and saving...")
 
     steps = np.arange(168,360,12,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 7-14 every 12 hours
     lats = np.arange(45,65.5,0.5)[::-1]
@@ -38,7 +38,6 @@ def get_z(period):
     ds = ds.sel(latitude=lats,longitude=lons,step=steps)
     ds.gh.to_netcdf('data/test.nc')
     toc3 = time.perf_counter()
-    print(f"finished saving in {(toc3 - toc2):0.4f} seconds.")
 
 
 def get_wind_10(n, period):
@@ -48,12 +47,12 @@ def get_wind_10(n, period):
     H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="vgrd_hgt")
 
     toc = time.perf_counter()
-    print(f"finished FastHerbie in {toc - tic:0.4f} seconds. Now putting into xarray...")
+    print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray: takes a long time :(
     steps = np.arange(144,360,12,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-14 every 12 hours
     lats = np.arange(55.5,56.5,0.5)[::-1]
-    lons = np.arange(240,241,0.5)
+    lons = np.arange(239.5,240.5,0.5)
 
     u_10 = H.xarray(":UGRD:10 m")
     u_10 = u_10.sel(latitude=lats,longitude=lons,step=steps)
@@ -65,14 +64,15 @@ def get_wind_10(n, period):
     v_10 = v_10.sel(latitude=lats,longitude=lons,step=steps)
 
     toc2 = time.perf_counter()
-    print(f"finished xarray in {(toc2 - toc)/60:0.4f} minutes. Now saving...")
+    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now saving...")
 
-    w10 = u_10.assign(wind=np.sqrt(u_10.u10**2 + v_10.v10**2))
-    title = 'data/' + str(n) + 'wind10.nc'
-    w10.wind.to_netcdf(title)
+    w10 = u_10.assign(wind10=np.sqrt(u_10.u10**2 + v_10.v10**2))
+    if n <10:
+        title = 'data/0' + str(n) + 'wind10.nc'
+    else:
+        title = 'data/' + str(n) + 'wind10.nc'
+    w10.wind10.to_netcdf(title)
 
-    toc3 = time.perf_counter()
-    print(f"finished saving in {(toc3 - toc2):0.4f} seconds.")
 
 
 def get_wind_100(n, period):
@@ -82,12 +82,12 @@ def get_wind_100(n, period):
     H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="vgrd_hgt")
 
     toc = time.perf_counter()
-    print(f"finished FastHerbie in {toc - tic:0.4f} seconds. Now putting into xarray...")
+    print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray: takes a long time :(
     steps = np.arange(144,360,12,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-14 every 12 hours
     lats = np.arange(55.5,56.5,0.5)[::-1]
-    lons = np.arange(240,241,0.5)
+    lons = np.arange(239.5,240.5,0.5)
 
     u_100 = H.xarray(":UGRD:100 m")
     u_100 = u_100.sel(latitude=lats,longitude=lons,step=steps)
@@ -99,22 +99,38 @@ def get_wind_100(n, period):
     v_100 = v_100.drop('heightAboveGround')
     v_100 = v_100.sel(latitude=lats,longitude=lons,step=steps)
     toc2 = time.perf_counter()
-    print(f"finished xarray in {(toc2 - toc)/60:0.4f} minutes. Now saving...")
+    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now saving...")
 
-    w100 = u_100.assign(wind=np.sqrt(u_100.u100**2 + v_100.v100**2))
-    title = 'data/' + str(n) + 'wind100.nc'
-    w100.wind.to_netcdf(title)
+    w100 = u_100.assign(wind100=np.sqrt(u_100.u100**2 + v_100.v100**2))
+    if n <10:
+        title = 'data/0' + str(n) + 'wind100.nc'
+    else:
+        title = 'data/' + str(n) + 'wind100.nc'
+    w100.wind100.to_netcdf(title)
 
-    toc3 = time.perf_counter()
-    print(f"finished saving in {(toc3 - toc2):0.4f} seconds.")
 
 
 def merge_data():
     #take multiple ncs of gefs and combine them
+    print('merging netcdf files...')
     file_list = glob.glob("data/*wind10.nc")
+    file_list.sort()
     ds = xr.open_dataset(file_list[0])
-    for file in file_list:
+    for file in file_list[1:]:
         ds = xr.concat([ds, xr.open_dataset(file)],dim='time')
+    
+    start = str(ds.time.values[0])[:10]
+    end = str(ds.time.values[-1])[:10]
+
+    file_list = glob.glob("data/*wind100.nc")
+    file_list.sort()
+    ds2 = xr.open_dataset(file_list[0])
+    for file in file_list[1:]:
+        ds2 = xr.concat([ds2, xr.open_dataset(file)],dim='time')
+    
+    ds = xr.merge([ds,ds2])
+
+    ds.to_netcdf('data/wind-'+start+'-'+end+'.nc')
 
 
 
@@ -124,14 +140,15 @@ if __name__ == '__main__':
     big_tic = time.perf_counter()
 
     # set search params
-    date_list = make_dates("2012-11-25", number=2, max=30)
+    date_list = make_dates("2018-12-26", number=23, max=16)
 
     # multiprocessing to speed up. can add more threads and decrease amount of days at once if need more speed
-    for j in range(len(date_list)):
-        with ThreadPoolExecutor(2) as exe:
-            exe.submit(get_wind_10,j,date_list[j])
-            exe.submit(get_wind_100,j,date_list[j])
+    with ThreadPoolExecutor(4) as exe:
+        [exe.submit(get_wind_10,j,date_list[j]) for j in range(len(date_list))]
+        [exe.submit(get_wind_100,i,date_list[i]) for i in range(len(date_list))]
+
+    merge_data()
 
     big_toc = time.perf_counter()
-    print(f"finished the whole shebang in {(big_toc - big_tic)/60:0.4f} minutes.")
+    print(f"finished the whole shebang in {(big_toc - big_tic)/60:0.2f} minutes or {(big_toc - big_tic)/3600:0.2f} hours.")
     print(datetime.now())
