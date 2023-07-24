@@ -43,8 +43,8 @@ def get_z(period):
 def get_wind_10(n, period):
     # Herbie : quick
     tic = time.perf_counter()
-    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="ugrd_hgt")
-    H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="vgrd_hgt")
+    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=1, variable_level="ugrd_hgt")
+    H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=1, variable_level="vgrd_hgt")
 
     toc = time.perf_counter()
     print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
@@ -68,9 +68,9 @@ def get_wind_10(n, period):
 
     w10 = u_10.assign(wind10=np.sqrt(u_10.u10**2 + v_10.v10**2))
     if n <10:
-        title = 'data/0' + str(n) + 'wind10.nc'
+        title = 'data/0' + str(n) + 'wind10-1.nc'
     else:
-        title = 'data/' + str(n) + 'wind10.nc'
+        title = 'data/' + str(n) + 'wind10-1.nc'
     w10.wind10.to_netcdf(title)
 
 
@@ -78,8 +78,8 @@ def get_wind_10(n, period):
 def get_wind_100(n, period):
     # Herbie : quick
     tic = time.perf_counter()
-    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="ugrd_hgt")
-    H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=0, variable_level="vgrd_hgt")
+    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=1, variable_level="ugrd_hgt")
+    H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=1, variable_level="vgrd_hgt")
 
     toc = time.perf_counter()
     print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
@@ -99,13 +99,13 @@ def get_wind_100(n, period):
     v_100 = v_100.drop('heightAboveGround')
     v_100 = v_100.sel(latitude=lats,longitude=lons,step=steps)
     toc2 = time.perf_counter()
-    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now saving...")
+    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes.", datetime.now())
 
     w100 = u_100.assign(wind100=np.sqrt(u_100.u100**2 + v_100.v100**2))
     if n <10:
-        title = 'data/0' + str(n) + 'wind100.nc'
+        title = 'data/0' + str(n) + 'wind100-1.nc'
     else:
-        title = 'data/' + str(n) + 'wind100.nc'
+        title = 'data/' + str(n) + 'wind100-1.nc'
     w100.wind100.to_netcdf(title)
 
 
@@ -113,7 +113,7 @@ def get_wind_100(n, period):
 def merge_data():
     #take multiple ncs of gefs and combine them
     print('merging netcdf files...')
-    file_list = glob.glob("data/*wind10.nc")
+    file_list = glob.glob("data/*wind10-1.nc")
     file_list.sort()
     ds = xr.open_dataset(file_list[0])
     for file in file_list[1:]:
@@ -122,7 +122,7 @@ def merge_data():
     start = str(ds.time.values[0])[:10]
     end = str(ds.time.values[-1])[:10]
 
-    file_list = glob.glob("data/*wind100.nc")
+    file_list = glob.glob("data/*wind100-1.nc")
     file_list.sort()
     ds2 = xr.open_dataset(file_list[0])
     for file in file_list[1:]:
@@ -130,7 +130,7 @@ def merge_data():
     
     ds = xr.merge([ds,ds2])
 
-    ds.to_netcdf('data/wind-'+start+'-'+end+'.nc')
+    ds.to_netcdf('data/wind-'+start+'-'+end+'-1.nc')
 
 
 
@@ -140,12 +140,14 @@ if __name__ == '__main__':
     big_tic = time.perf_counter()
 
     # set search params
-    date_list = make_dates("2018-12-26", number=23, max=16)
+    date_list = make_dates("2018-12-26", number=1, max=16)
 
     # multiprocessing to speed up. can add more threads and decrease amount of days at once if need more speed
-    with ThreadPoolExecutor(4) as exe:
-        [exe.submit(get_wind_10,j,date_list[j]) for j in range(len(date_list))]
-        [exe.submit(get_wind_100,i,date_list[i]) for i in range(len(date_list))]
+    for j in np.arange(stop=len(date_list)):
+        with ThreadPoolExecutor(3) as exe:
+            exe.submit(get_wind_10,j,date_list[j])
+            exe.submit(get_wind_100,j,date_list[j])
+
 
     merge_data()
 
