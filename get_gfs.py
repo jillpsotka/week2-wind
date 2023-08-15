@@ -165,7 +165,7 @@ if __name__ == '__main__':
     days = 7  #16
     # nov 9 has to be on day 1 (?)
     date_list = make_dates("2018-12-22", number=chunks, max=days)  # 2018-12-26 start
-    member = 1
+    member = 4
     lats = np.arange(55.5,56.5,0.5)[::-1]
     lons = np.arange(239.5,240.5,0.5)
     dir = "data/"
