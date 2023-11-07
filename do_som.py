@@ -5,9 +5,17 @@ from sklearn.decomposition import PCA
 from som_class import SOM, BMUs, BMU_frequency, colourmap_2D
 import xarray as xr
 import time
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.ticker as mticker
+import pickle
 
 
 def prep_gefs(ds, step_int=0):
+    bad_indices = np.argwhere(np.isnan(ds.gh.values))[:,0][0]
+    if bad_indices:
+        ds = ds.where(ds.time!=ds.time[bad_indices],drop=True)
+
     ds_arr = ds.gh.to_numpy()
     ds_arr = np.reshape(ds_arr,(ds.time.shape[0],ds.latitude.shape[0]*ds.longitude.shape[0]))
 
@@ -55,10 +63,8 @@ def train_som(gefs_arr, obs_arr):
 
     #pca_gefs(gefs_arr)
 
-
-    N_nodes = Nx*Ny
     learning_rate = 1e-2
-    N_epochs = 50
+    N_epochs = 60
     colours_list = 'default2'
 
     som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth=4, colours_list=colours_list)
@@ -68,55 +74,91 @@ def train_som(gefs_arr, obs_arr):
     tic = time.perf_counter()
     som.train_map(learning_rate)
     toc = time.perf_counter()
-    print(f'Finished training map in {toc - tic:0.2f} seconds')
+    print(f'Finished training map in {toc - tic:0.2f} seconds. Saving...')
 
+    with open('trained-map.pkl', 'wb') as handle:
+        pickle.dump(som, handle)
+
+    return som
+
+
+def plot_som(Nx, Ny, z, indices):
+    proj=ccrs.Robinson()
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,figsize=(Nx*3,Ny*2),subplot_kw={'projection': proj},gridspec_kw = {'wspace':0.2, 'hspace':0.12})
+    i = 0
+    k = 3645
+    for kk, ax in enumerate(axes.flatten()):
+        var = z[indices[kk],i:k].reshape(45,81)
+        ax.set_extent(([220,262,41,68]))
+        
+        
+        ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
+            name='admin_0_boundary_lines_land', scale='50m', facecolor='none', edgecolor='k',alpha=0.3,linewidth=0.6))
+        ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
+            name='admin_1_states_provinces_lines', scale='50m',facecolor='none', edgecolor='k',alpha=0.3,linewidth=0.6))
+        ax.add_feature(cfeature.NaturalEarthFeature('physical', 'ocean', \
+            scale='50m', edgecolor='k', facecolor='none', alpha=0.3,linewidth=0.6))
+        
+        ax.contourf(lon, lat, var, transform=ccrs.PlateCarree(),cmap='RdBu_r')
+
+        # Create gridlines
+        gl = ax.gridlines(crs=ccrs.PlateCarree(), linewidth=0.8, color='black', alpha=0.2,linestyle='--')
+        # Manipulate gridlines number and spaces
+        gl.ylocator = mticker.FixedLocator(np.arange(-90,90,10))
+        gl.xlocator = mticker.FixedLocator(np.arange(-180, 180, 10)) 
+        gl.top_labels = False
+        gl.bottom_labels = True
+        gl.left_labels = True
+        gl.right_labels = False
+    plt.show()
+
+    #plt.plot(range(gefs_arr.shape[0]), bmus, 'bo--')
+    return None
+
+
+def wind_distributions(bmus):
+    
+    distributions = np.empty(N_nodes)
+    
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx)
+    
+    for i, ax in enumerate(axes.flatten()):
+        distribution = obs[np.where(bmus==i+1)[0]]  # wind obs that belong to this node -> this is our distribution
+        ax.hist(distribution, bins='auto')
+        ax.set_title('Avg wind speed ='+str(round(np.mean(distribution),2))+'m/s')
+
+    plt.tight_layout()
+    plt.show()
+
+    return distributions
+
+
+
+if __name__ ==  "__main__":
+    step = 3
+    lat = np.arange(44,66.5,0.5)[::-1]
+    lon = np.arange(220,260.5,0.5)
+    #gefs = xr.open_dataset('/Users/jpsotka/Nextcloud/geo-height-data/gh-2012-11-20-2017-12-25-0.nc')#.isel(step=step)
+    gefs = xr.open_dataset('data/geo-height-2012-2017-12h-0.nc').isel(step=step)
+
+    obs, gefs = prep_obs(xr.open_dataset('data/obs-all-12h.nc'), gefs, step)
+    
+
+    gefs = prep_gefs(gefs, step)
+
+    Nx = 2
+    Ny = 6
+    N_nodes = Nx * Ny
+
+    #som = train_som(gefs, obs)
+    with open('trained-map.pkl','rb') as handle:
+        som = pickle.load(handle)
     z = som.z  # pattern of each node
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
     bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
     freq = BMU_frequency(som)  # frequency of each node
     QE = som.QE()  # quantization error
     TE = som.TE()  # topographic error
-
-
-    return z, indices, bmus
-
-
-def plot_som(Nx, Ny, z, indices):
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx)
-    i = 0
-    k = 3645
-    for kk, ax in enumerate(axes.flatten()):
-        var = z[indices[kk],i:k].reshape(45,81)
-        ax.contourf(lon, lat, var, cmap='RdBu_r')
-    plt.show()
-
-    #plt.plot(range(gefs_arr.shape[0]), bmus, 'bo--')
-
-
-def wind_distributions(bmus):
-    N_nodes = 30
-    distributions = np.empty(N_nodes)
-    for i in range(N_nodes):
-        distributions[i] = obs[np.where(bmus==i+1)[0]]  # wind obs that belong to this node -> this is our distribution
-
-    return distributions
-
-
-if __name__ ==  "__main__":
-    step = 1
-    lat = np.arange(44,66.5,0.5)[::-1]
-    lon = np.arange(220,260.5,0.5)
-    gefs = xr.open_dataset('data/gh-2017-12-22-2018-12-27-0.nc').isel(step=step)
-
-    obs, gefs = prep_obs(xr.open_dataset('data/bm-2018-12h.nc'), gefs, step)
-    
-
-    gefs = prep_gefs(gefs, step)
-
-    Nx = 3
-    Ny = 10
-
-    z, ind, bmus = train_som(gefs, obs)
-    #plot_som(Nx, Ny, z, ind)
+    plot_som(Nx, Ny, z, indices)
     wind_distributions(bmus)
     
