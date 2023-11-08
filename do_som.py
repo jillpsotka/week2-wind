@@ -2,29 +2,37 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
-from som_class import SOM, BMUs, BMU_frequency, colourmap_2D
+from som_class import SOM, BMUs, BMU_frequency
 import xarray as xr
 import time
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import matplotlib.ticker as mticker
 import pickle
+from cmcrameri import cm
+import os
 
 
-def prep_gefs(ds, step_int=0):
-    bad_indices = np.argwhere(np.isnan(ds.gh.values))[:,0][0]
+def prep_gefs(ds, obs_arr, step_int=0):
+    bad_indices = np.argwhere(np.isnan(ds.gh.values))[:,0][0] # attempt at getting rid of nans TO DO OBS TOO!!!!
     if bad_indices:
         ds = ds.where(ds.time!=ds.time[bad_indices],drop=True)
+        obs_arr = np.delete(obs_arr,bad_indices)
 
     ds_arr = ds.gh.to_numpy()
-    ds_arr = np.reshape(ds_arr,(ds.time.shape[0],ds.latitude.shape[0]*ds.longitude.shape[0]))
+    ds_arr = np.reshape(ds_arr,(ds.time.shape[0],ds.latitude.shape[0]*ds.longitude.shape[0])) #(time,space)
+
+    if ds_arr.shape[0] != obs_arr.shape[0]:
+        print('GEFS and obs not the same shape! Exiting...')
+        os.exit()
 
 
-    return ds_arr
+    return ds_arr, obs_arr
 
 
 
 def prep_obs(ds, gefs, step_int):
+    # make times of obs and gefs line up
  
     ds = ds.where(~np.isnan(ds.Wind),drop=True)  # get rid of nan obs
 
@@ -58,6 +66,7 @@ def pca_gefs(gefs):
 
 def train_som(gefs_arr, obs_arr):
     # normalize data (this is actually the z score, could try other methods of standardization)
+    # I think I need to normalize over space, so each z pattern is conserved
     gefs_arr = (gefs_arr - np.mean(gefs_arr,axis=0)) / np.std(gefs_arr,axis=0)  # axis 1 is the space axis
     obs_arr = (obs_arr - np.mean(obs_arr)) / np.std(obs_arr)
 
@@ -76,40 +85,42 @@ def train_som(gefs_arr, obs_arr):
     toc = time.perf_counter()
     print(f'Finished training map in {toc - tic:0.2f} seconds. Saving...')
 
-    with open('trained-map.pkl', 'wb') as handle:
-        pickle.dump(som, handle)
+    # with open('trained-map.pkl', 'wb') as handle:
+    #     pickle.dump(som, handle)
 
     return som
 
 
 def plot_som(Nx, Ny, z, indices):
-    proj=ccrs.Robinson()
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,figsize=(Nx*3,Ny*2),subplot_kw={'projection': proj},gridspec_kw = {'wspace':0.2, 'hspace':0.12})
+    proj=ccrs.PlateCarree()
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',figsize=(Nx*3,Ny*2),subplot_kw={'projection': proj, 'aspect':1.4},gridspec_kw = {'wspace':0.1, 'hspace':0.1})
     i = 0
     k = 3645
     for kk, ax in enumerate(axes.flatten()):
         var = z[indices[kk],i:k].reshape(45,81)
-        ax.set_extent(([220,262,41,68]))
+        ax.set_extent(([219,261,43.25,65.25]))
         
         
         ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
-            name='admin_0_boundary_lines_land', scale='50m', facecolor='none', edgecolor='k',alpha=0.3,linewidth=0.6))
+            name='admin_0_boundary_lines_land', scale='50m', facecolor='none', edgecolor='k',alpha=0.4,linewidth=0.6))
         ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
             name='admin_1_states_provinces_lines', scale='50m',facecolor='none', edgecolor='k',alpha=0.3,linewidth=0.6))
         ax.add_feature(cfeature.NaturalEarthFeature('physical', 'ocean', \
-            scale='50m', edgecolor='k', facecolor='none', alpha=0.3,linewidth=0.6))
+            scale='50m', edgecolor='k', facecolor='none', alpha=0.4,linewidth=0.6))
         
-        ax.contourf(lon, lat, var, transform=ccrs.PlateCarree(),cmap='RdBu_r')
+        ax.contourf(lon, lat, var, transform=ccrs.PlateCarree(),cmap=cm.acton)
+        ax.scatter(360-120.4306,55.6986,c='k',transform=ccrs.PlateCarree(),s=6,marker='*')
 
         # Create gridlines
         gl = ax.gridlines(crs=ccrs.PlateCarree(), linewidth=0.8, color='black', alpha=0.2,linestyle='--')
         # Manipulate gridlines number and spaces
         gl.ylocator = mticker.FixedLocator(np.arange(-90,90,10))
         gl.xlocator = mticker.FixedLocator(np.arange(-180, 180, 10)) 
-        gl.top_labels = False
-        gl.bottom_labels = True
-        gl.left_labels = True
-        gl.right_labels = False
+        if kk > (Ny*Nx) - Nx - 1:
+            gl.bottom_labels = True
+        if kk % Nx == 0:
+            gl.left_labels = True
+    plt.suptitle('z500 clusters')
     plt.show()
 
     #plt.plot(range(gefs_arr.shape[0]), bmus, 'bo--')
@@ -144,7 +155,7 @@ if __name__ ==  "__main__":
     obs, gefs = prep_obs(xr.open_dataset('data/obs-all-12h.nc'), gefs, step)
     
 
-    gefs = prep_gefs(gefs, step)
+    gefs, obs = prep_gefs(gefs, obs, step)
 
     Nx = 2
     Ny = 6
@@ -160,5 +171,5 @@ if __name__ ==  "__main__":
     QE = som.QE()  # quantization error
     TE = som.TE()  # topographic error
     plot_som(Nx, Ny, z, indices)
-    wind_distributions(bmus)
+    #wind_distributions(bmus)
     
