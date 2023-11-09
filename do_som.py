@@ -171,5 +171,5 @@ if __name__ ==  "__main__":
     QE = som.QE()  # quantization error
     TE = som.TE()  # topographic error
     plot_som(Nx, Ny, z, indices)
-    #wind_distributions(bmus)
+    wind_distributions(bmus)
     

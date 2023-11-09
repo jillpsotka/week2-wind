@@ -9,6 +9,7 @@ import glob
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
+import os
 
 
 def make_dates(start_date="2012-11-25" ,number=23, max=16):
@@ -26,7 +27,7 @@ def get_z(n, period, mem, lat,lon, dir=''):
     tic = time.perf_counter()
     H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="hgt_pres_abv700mb")
     toc = time.perf_counter()
-    print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
+    #print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray
     ds = H.xarray(":500 mb:",lats=lat,lons=lon)
@@ -35,7 +36,7 @@ def get_z(n, period, mem, lat,lon, dir=''):
         ds = ds.sel(time=period).isel(step=slice(int(s1/2),s1))
         print('problem date in', period)
     toc2 = time.perf_counter()
-    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now clipping and saving...")
+    #print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now clipping and saving...")
 
     steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
     steps2 = np.arange(240,367,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
@@ -47,7 +48,7 @@ def get_z(n, period, mem, lat,lon, dir=''):
     else:
         title = dir + str(n) + 'gh-' + str(mem) + '.nc'
     ds.gh.to_netcdf(title)
-    print('Done that set', datetime.now())
+    print('Done file',str(n), datetime.now())
 
 
 def get_wind_10(n, period, mem,lat,lon,dir=''):
@@ -196,6 +197,9 @@ def merge_z_data(member=0,dir=''):
     ds = xr.open_dataset(file_list[0])
     for file in file_list[1:]:
         ds = xr.concat([ds, xr.open_dataset(file)],dim='time')
+        os.remove(file)  # delete file after merging - might regret this
+
+    ds = ds.gh.sortby('time')
     
     start = str(ds.time.values[0])[:10]
     end = str(ds.time.values[-1])[:10]
@@ -216,28 +220,29 @@ if __name__ == '__main__':
     big_tic = time.perf_counter()
 
     # set search params
-    chunks = 53 #53 #23
+    chunks = 266 #53 #23 #266
     days = 7  #7 #16
     # nov 9 has to be on day 1 (?)
-    date_list = make_dates("2017-12-22", number=chunks, max=days)  # 2018-12-26 start
-    date_list = make_dates("2019-11-09",number=1,max=7)
-    member = 4
-    lats = np.arange(55.5,56.5,0.5)[::-1]
-    lons = np.arange(239.5,240.5,0.5)
-    #lats = np.arange(44,66.5,0.5)[::-1]
-    #lons = np.arange(220,260.5,0.5)
+    date_list = make_dates("2012-11-20", number=chunks, max=days)  # 2012-11-20 start
+    #date_list = make_dates("2017-12-22", number=chunks, max=days)  # 2018-12-26 start
+    #date_list = make_dates("2019-11-09",number=1,max=7)
+    #lats = np.arange(55.5,56.5,0.5)[::-1]
+    #lons = np.arange(239.5,240.5,0.5)
+    lats = np.arange(44,66.5,0.5)[::-1]
+    lons = np.arange(220,260.5,0.5)
     dir = "data/"
-    do_all_wind(46,date_list[0],member,lats,lons,dir)
+    for member in range(3,5):
 
+        #do_all_wind(46,date_list[0],member,lats,lons,dir)
 
-    #pool = multiprocessing.Pool(3)
-    #processes = [pool.apply_async(do_all_wind, args=(j, date_list[j],member,lats,lons,dir))for j in range(len(date_list))]
-    #processes = [pool.apply_async(get_z, args=(j, date_list[j],member,lats,lons,dir))for j in range(len(date_list))]
-    #result = [p.get() for p in processes]
+        pool = multiprocessing.Pool(3)
+        #processes = [pool.apply_async(do_all_wind, args=(j, date_list[j],member,lats,lons,dir))for j in range(len(date_list))]
+        processes = [pool.apply_async(get_z, args=(j, date_list[j],member,lats,lons,dir))for j in range(len(date_list))]
+        result = [p.get() for p in processes]
 
-    merge_wind_data(member,dir)
-    #merge_z_data(member,dir)
+        #merge_wind_data(member,dir)
+        merge_z_data(member,dir)
 
-    big_toc = time.perf_counter()
-    print(f"finished the whole shebang in {(big_toc - big_tic)/60:0.2f} minutes or {(big_toc - big_tic)/3600:0.2f} hours.")
-    print(datetime.now())
+        big_toc = time.perf_counter()
+        print(f"finished the whole shebang in {(big_toc - big_tic)/60:0.2f} minutes or {(big_toc - big_tic)/3600:0.2f} hours.")
+        print(datetime.now())

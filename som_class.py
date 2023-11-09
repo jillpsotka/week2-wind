@@ -116,7 +116,7 @@ class SOM:
 
         return sigma
 
-    def train_step(self, obs, sigma):
+    def train_step(self, obs, sigma, learning_rate):
 
         """
         This function performs one training step (epoch).  Each observation is passed through the map and the map nodes are updated.
@@ -153,7 +153,7 @@ class SOM:
         z_epochs = np.zeros((N_nodes, N_dims, self.N_epochs + 1))  # nodes in data-space at end of each epoch
         z_epochs[:, :, 0] = self.z_init
 
-        for epoch in range(N_epochs):  # for each epoch
+        for epoch in range(self.N_epochs):  # for each epoch
 
             # shuffle data -- present data to map in a different order
             obs_shuffle = np.copy(self.obs)
@@ -164,7 +164,7 @@ class SOM:
             self.sigmas[epoch] = sigma
 
             # do one training step
-            self.train_step(obs=obs_shuffle, sigma=sigma)
+            self.train_step(obs=obs_shuffle, sigma=sigma, learning_rate=learning_rate)
             z_epochs[:, :, epoch + 1] = self.z
 
         self.z_epochs = z_epochs

@@ -76,8 +76,8 @@ def interp(gefs):
                        gefs.wind100.isel(latitude=1,longitude=0),
                        gefs.wind100.isel(latitude=1,longitude=1)])
     
-    w10 = interpolate.griddata(coords, vals10, loc, method='linear').squeeze()*3.6  
-    w100 = interpolate.griddata(coords, vals100, loc, method='linear').squeeze()*3.6
+    w10 = interpolate.griddata(coords, vals10, loc, method='linear').squeeze()  
+    w100 = interpolate.griddata(coords, vals100, loc, method='linear').squeeze()
 
     # vertical interp using power law
     alpha = np.log(w100/w10) / np.log(100/10)  # shear exponent
@@ -105,6 +105,7 @@ def split_days(arr, n, gefs):
 def combine_obs_gefs(obs, gefs):
     arr = interp(gefs)
     gefs = gefs.assign(wind=(['member','time','step'],arr)).drop_dims(['longitude','latitude'])
+    gefs = gefs.drop_vars(['valid_time','number'])
 
     # arr is the interpolated forecast of shape (step, times)
     # d6 = split_days(arr, 6, gefs)  # this adds back in time dimension
@@ -142,13 +143,15 @@ def calculate_climo(obs, ds):
 if __name__ == '__main__':
     print('starting', datetime.now())
     res = 12  # resolution to avg
-    dates = slice("2018-12-31", "2019-12-31")
+    dates = slice("2012-11-20", "2019-12-25")
+    gefs = xr.open_dataset('/Users/jpsotka/Nextcloud/geo-height-data/gh-2012-11-20-2017-12-25-4.nc')
 
-    obs = load_obs(dates, res)
-    gefs = load_gefs(dates, res)
+    #obs = load_obs(dates, res)
+    #gefs = load_gefs(dates, res)
     gefs = resample_gefs(gefs)
-    gefs = combine_obs_gefs(obs, gefs)
-    climo = calculate_climo(obs, gefs)
-    #ds.to_netcdf('data/gefs-2019-d.nc')
+    #gefs = combine_obs_gefs(obs, gefs)
+    #climo = calculate_climo(obs, gefs)
+
+    gefs.to_netcdf('data/geo-height-2012-2017-12h-4.nc')
     
     print('done',datetime.now())
