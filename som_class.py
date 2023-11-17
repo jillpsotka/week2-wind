@@ -104,7 +104,7 @@ class SOM:
         """
         This function returns sigma (standard deviation of neighbourhood function), which undergoes a linear decrease over
         all epochs, starting at sigma_max and ending at sigma_min
-
+ 
         sigma_max: initial sigma at epoch
         sigma_min: final minimum sigma at last epoch
         epoch: current training epoch (int)

@@ -51,6 +51,7 @@ def get_z(n, period, mem, lat,lon, dir=''):
     print('Done file',str(n), datetime.now())
 
 
+
 def get_wind_10(n, period, mem,lat,lon,dir=''):
     # Herbie : quick
     tic = time.perf_counter()

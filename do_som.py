@@ -14,7 +14,7 @@ import os
 
 
 def prep_gefs(ds, obs_arr, step_int=0):
-    bad_indices = np.argwhere(np.isnan(ds.gh.values))[:,0][0] # attempt at getting rid of nans TO DO OBS TOO!!!!
+    bad_indices = np.argwhere(np.isnan(ds.gh.values))[:,0][0] 
     if bad_indices:
         ds = ds.where(ds.time!=ds.time[bad_indices],drop=True)
         obs_arr = np.delete(obs_arr,bad_indices)
@@ -52,6 +52,8 @@ def prep_obs(ds, gefs, step_int):
 
 def pca_gefs(gefs):
     # do PCA to see the ratio of nodes in the ideal map
+    # I checked: it is correct that gefs is in form (time, space)
+    # this makes the eigvecs the same shape as the grid, and the PCs have length time
     pca = PCA(n_components=10)
     PCs = pca.fit_transform(gefs)
     frac_var = pca.explained_variance_ratio_
@@ -66,9 +68,14 @@ def pca_gefs(gefs):
 
 def train_som(gefs_arr, obs_arr):
     # normalize data (this is actually the z score, could try other methods of standardization)
+    # TO DO: leaving this out for now, since normalizing feels almost like taking anomalies, which I don't want to do
+    # -> in the future, I'll try normalizing over both space and time and see how it affects performance
     # I think I need to normalize over space, so each z pattern is conserved
-    gefs_arr = (gefs_arr - np.mean(gefs_arr,axis=0)) / np.std(gefs_arr,axis=0)  # axis 1 is the space axis
-    obs_arr = (obs_arr - np.mean(obs_arr)) / np.std(obs_arr)
+    # normalization across time: anomalies. normalization across space: chill?
+    gefs_mean = np.mean(gefs)
+    gefs_std = np.std(gefs)
+    #gefs_arr = (gefs_arr - np.mean(gefs_arr,axis=0)) / np.std(gefs_arr,axis=0)  # axis 1 is the space axis
+    # TO DO: Look at normalization from 510 lab 8 
 
     #pca_gefs(gefs_arr)
 
@@ -85,21 +92,22 @@ def train_som(gefs_arr, obs_arr):
     toc = time.perf_counter()
     print(f'Finished training map in {toc - tic:0.2f} seconds. Saving...')
 
-    # with open('trained-map.pkl', 'wb') as handle:
-    #     pickle.dump(som, handle)
+    with open('trained-map.pkl', 'wb') as handle:
+        pickle.dump(som, handle)
 
     return som
 
 
 def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',figsize=(Nx*3,Ny*2),subplot_kw={'projection': proj, 'aspect':1.4},gridspec_kw = {'wspace':0.1, 'hspace':0.1})
-    i = 0
-    k = 3645
+    vmin = np.min(z)
+    vmax = np.max(z)  # colorbar range
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',figsize=(Nx*3,Ny*2),subplot_kw={'projection': proj, 'aspect':1.4},gridspec_kw = {'wspace':0.3, 'hspace':0.05})
+
     for kk, ax in enumerate(axes.flatten()):
-        var = z[indices[kk],i:k].reshape(45,81)
+        var = z[indices[kk],:].reshape(45,81)
         ax.set_extent(([219,261,43.25,65.25]))
-        
+        ax.set_title('Node '+str(indices[kk]))      
         
         ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
             name='admin_0_boundary_lines_land', scale='50m', facecolor='none', edgecolor='k',alpha=0.4,linewidth=0.6))
@@ -108,7 +116,7 @@ def plot_som(Nx, Ny, z, indices):
         ax.add_feature(cfeature.NaturalEarthFeature('physical', 'ocean', \
             scale='50m', edgecolor='k', facecolor='none', alpha=0.4,linewidth=0.6))
         
-        ax.contourf(lon, lat, var, transform=ccrs.PlateCarree(),cmap=cm.acton)
+        cs = ax.contourf(lon, lat, var, vmin=vmin,vmax=vmax, transform=ccrs.PlateCarree(),cmap=cm.acton)
         ax.scatter(360-120.4306,55.6986,c='k',transform=ccrs.PlateCarree(),s=6,marker='*')
 
         # Create gridlines
@@ -120,10 +128,13 @@ def plot_som(Nx, Ny, z, indices):
             gl.bottom_labels = True
         if kk % Nx == 0:
             gl.left_labels = True
+
+    cbar_ax = fig.add_axes([0.1, 0.05, 0.6, 0.02])
+    cbar = fig.colorbar(cs, cax=cbar_ax,orientation='horizontal')
     plt.suptitle('z500 clusters')
     plt.show()
 
-    #plt.plot(range(gefs_arr.shape[0]), bmus, 'bo--')
+    
     return None
 
 
@@ -131,14 +142,16 @@ def wind_distributions(bmus):
     
     distributions = np.empty(N_nodes)
     
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx)
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, gridspec_kw = {'wspace':0.5, 'hspace':0.5})
+    vmin = np.min(obs)
+    vmax = np.max(obs)
     
     for i, ax in enumerate(axes.flatten()):
-        distribution = obs[np.where(bmus==i+1)[0]]  # wind obs that belong to this node -> this is our distribution
-        ax.hist(distribution, bins='auto')
+        distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
+        ax.hist(distribution, range=(vmin,vmax),bins='auto')
         ax.set_title('Avg wind speed ='+str(round(np.mean(distribution),2))+'m/s')
 
-    plt.tight_layout()
+    #plt.tight_layout()
     plt.show()
 
     return distributions
@@ -154,22 +167,27 @@ if __name__ ==  "__main__":
 
     obs, gefs = prep_obs(xr.open_dataset('data/obs-all-12h.nc'), gefs, step)
     
-
     gefs, obs = prep_gefs(gefs, obs, step)
 
-    Nx = 2
-    Ny = 6
+    Nx = 6
+    Ny = 2
     N_nodes = Nx * Ny
+    train = True
+    if train:
+        som = train_som(gefs, obs)
+    else:
+        with open('trained-map.pkl','rb') as handle:
+            som = pickle.load(handle)
 
-    #som = train_som(gefs, obs)
-    with open('trained-map.pkl','rb') as handle:
-        som = pickle.load(handle)
     z = som.z  # pattern of each node
+    z_epochs = som.z_epochs  # pattern of each node through training
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
     bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
     freq = BMU_frequency(som)  # frequency of each node
     QE = som.QE()  # quantization error
     TE = som.TE()  # topographic error
     plot_som(Nx, Ny, z, indices)
+    #plt.plot(range(gefs.shape[0]), bmus, 'bo--')
+    #plt.show()
     wind_distributions(bmus)
     
