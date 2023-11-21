@@ -98,6 +98,39 @@ def train_som(gefs_arr, obs_arr):
     return som
 
 
+def test_shapes(gefs_arr):
+    STOP = 0
+    testing_x = np.arange(1,2)
+    testing_y = np.arange(2,4)
+    learning_rate = 1e-2
+    N_epochs = 100
+    colours_list = 'pink_blue_red_purple'
+    colours_list = 'pinks'
+    colours_list = 'default2'
+    QE = []
+    TE = []
+    for ii in range(testing_x.shape[0]):
+        Nx = testing_x[ii]
+        for jj in range(testing_y.shape[0]):
+            Ny = testing_y[jj]
+            som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth = 4, colours_list = colours_list)
+            som.initialize_map(node_shape = 'hex')
+            som.train_map(learning_rate)
+            z = som.z #this is the pattern of each BMU
+            QE.append(som.QE()) #quantization error of map
+            TE.append(som.TE()) #topographic error of map
+    
+    plt.figure()
+    plt.title('QE and TE')
+    plt.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),QE,label='QE')
+    plt.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),TE,label='TE')
+    plt.legend()
+    plt.show()
+    #plt.savefig('QEVTE.png')
+
+    stop = 0
+
+
 def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
     vmin = np.min(z)
@@ -163,7 +196,8 @@ if __name__ ==  "__main__":
     lat = np.arange(44,66.5,0.5)[::-1]
     lon = np.arange(220,260.5,0.5)
     #gefs = xr.open_dataset('/Users/jpsotka/Nextcloud/geo-height-data/gh-2012-11-20-2017-12-25-0.nc')#.isel(step=step)
-    gefs = xr.open_dataset('data/geo-height-2012-2017-12h-0.nc').isel(step=step)
+    #gefs = xr.open_dataset('data/geo-height-2012-2017-12h-0.nc').isel(step=step)
+    gefs = xr.open_dataset('data/gh-reanalysis-2014-01.nc')
 
     obs, gefs = prep_obs(xr.open_dataset('data/obs-all-12h.nc'), gefs, step)
     
@@ -172,7 +206,8 @@ if __name__ ==  "__main__":
     Nx = 6
     Ny = 2
     N_nodes = Nx * Ny
-    train = True
+    test_shapes(gefs)
+    train = False
     if train:
         som = train_som(gefs, obs)
     else:
