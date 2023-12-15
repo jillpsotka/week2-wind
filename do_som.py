@@ -11,15 +11,13 @@ import matplotlib.ticker as mticker
 import pickle
 from cmcrameri import cm
 import os
+from resampling import gefs_reanalysis, cleaned_obs, dates_obs_gefs
 
 
-def prep_gefs(ds, obs_arr, step_int=0):
-    bad_indices = np.argwhere(np.isnan(ds.gh.values))[:,0][0] 
-    if bad_indices:
-        ds = ds.where(ds.time!=ds.time[bad_indices],drop=True)
-        obs_arr = np.delete(obs_arr,bad_indices)
+def prep_data(ds, obs):
 
     ds_arr = ds.gh.to_numpy()
+    obs_arr = obs.Wind.to_numpy()
     ds_arr = np.reshape(ds_arr,(ds.time.shape[0],ds.latitude.shape[0]*ds.longitude.shape[0])) #(time,space)
 
     if ds_arr.shape[0] != obs_arr.shape[0]:
@@ -27,26 +25,8 @@ def prep_gefs(ds, obs_arr, step_int=0):
         os.exit()
 
 
-    return ds_arr, obs_arr
+    return obs_arr, ds_arr
 
-
-
-def prep_obs(ds, gefs, step_int):
-    # make times of obs and gefs line up
- 
-    ds = ds.where(~np.isnan(ds.Wind),drop=True)  # get rid of nan obs
-
-    times = gefs.time + gefs.step.values  # actual valid time of forecast
-    indices = times.isin(ds.index)  # indices of valid times that have obs
-    
-
-    times_new = times.where(indices, drop=True)  # valid times that have obs
-
-    gefs = gefs.sel(time = (times_new - gefs.step.values))  # get rid of gefs times that don't have obs
-    ds = ds.sel(index=times_new).Wind.to_numpy()  # get rid of obs that aren't in gefs
-
-
-    return ds, gefs
 
 
 
@@ -65,22 +45,43 @@ def pca_gefs(gefs):
     return None
 
 
+def visualize_normalization(gefs_arr):
+    gefs_mean = np.mean(gefs)  # this is the mean of each time step
+    gefs_std = np.std(gefs)
+    gefs_arr1 = (gefs_arr - gefs_mean) / gefs_std  # normalizing each time frame
+    gefs_arr2 = (gefs_arr1 * gefs_std) + gefs_mean  # reconstructed
+    # normalization from 510 did the whole array not just one axis - anomaly vibes
+    fig, axes = plt.subplots(nrows=1, ncols=3,sharex=True,sharey='row',figsize=(6,4))
+
+    for kk, ax in enumerate(axes.flatten()):
+        if kk == 0:
+            var = gefs_arr[kk,:].reshape(45,81)
+        elif kk == 1:
+            var = gefs_arr2[0,:].reshape(45,81)
+        else:
+            var = gefs_arr1[0,:].reshape(45,81)
+    
+        cs = ax.contourf(lon, lat, var,cmap=cm.acton)
+        ax.scatter(360-120.4306,55.6986,c='k',s=6,marker='*')
+        fig.colorbar(cs)
+
+    plt.suptitle('z500 clusters')
+    plt.show()
+
+
 
 def train_som(gefs_arr, obs_arr):
     # normalize data (this is actually the z score, could try other methods of standardization)
-    # TO DO: leaving this out for now, since normalizing feels almost like taking anomalies, which I don't want to do
-    # -> in the future, I'll try normalizing over both space and time and see how it affects performance
-    # I think I need to normalize over space, so each z pattern is conserved
-    # normalization across time: anomalies. normalization across space: chill?
-    gefs_mean = np.mean(gefs)
+    # TO DO: much to think about
+    gefs_mean = np.mean(gefs) 
     gefs_std = np.std(gefs)
-    #gefs_arr = (gefs_arr - np.mean(gefs_arr,axis=0)) / np.std(gefs_arr,axis=0)  # axis 1 is the space axis
-    # TO DO: Look at normalization from 510 lab 8 
+    gefs_arr = (gefs_arr - gefs_mean) / gefs_std  # normalizing each time frame
+    # normalization from 510 did the whole array
 
     #pca_gefs(gefs_arr)
 
-    learning_rate = 1e-2
-    N_epochs = 60
+    learning_rate = 1e-3
+    N_epochs = 200
     colours_list = 'default2'
 
     som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth=4, colours_list=colours_list)
@@ -98,20 +99,34 @@ def train_som(gefs_arr, obs_arr):
     return som
 
 
+def monitor_training(som):
+    z_epochs = som.z_epochs
+    diff = []
+    for i in range(1,z_epochs.shape[2]):
+        update = np.sum(z_epochs[:,:,i] - z_epochs[:,:,i-1])
+        diff.append(update)
+
+    plt.plot(diff)
+    plt.show()
+    
+    return None
+
+
 def test_shapes(gefs_arr):
-    STOP = 0
-    testing_x = np.arange(1,2)
-    testing_y = np.arange(2,4)
-    learning_rate = 1e-2
-    N_epochs = 100
+    testing_x = np.arange(3,12)
+    testing_y = np.arange(2,7)
+    x_labels=[]
+
+    learning_rate = 1e-3
+    N_epochs = 200
     colours_list = 'pink_blue_red_purple'
-    colours_list = 'pinks'
-    colours_list = 'default2'
+
     QE = []
     TE = []
     for ii in range(testing_x.shape[0]):
         Nx = testing_x[ii]
         for jj in range(testing_y.shape[0]):
+            x_labels.append(str(testing_x[ii])+'-'+str(testing_y[jj]))
             Ny = testing_y[jj]
             som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth = 4, colours_list = colours_list)
             som.initialize_map(node_shape = 'hex')
@@ -119,16 +134,20 @@ def test_shapes(gefs_arr):
             z = som.z #this is the pattern of each BMU
             QE.append(som.QE()) #quantization error of map
             TE.append(som.TE()) #topographic error of map
+        print(ii,'out of ',testing_x.shape[0])
     
-    plt.figure()
+    fig, ax1 = plt.subplots()
+    ax2 = ax1.twinx()
     plt.title('QE and TE')
-    plt.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),QE,label='QE')
-    plt.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),TE,label='TE')
-    plt.legend()
+    ax1.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),QE,label='QE')
+    ax2.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),TE,label='TE',c='orange')
+    ax1.set_xticks(np.arange(testing_x.shape[0]*testing_y.shape[0]))
+    ax1.set_xticklabels(x_labels)
+    ax1.legend(loc=0)
+    ax2.legend()
     plt.show()
     #plt.savefig('QEVTE.png')
 
-    stop = 0
 
 
 def plot_som(Nx, Ny, z, indices):
@@ -164,6 +183,7 @@ def plot_som(Nx, Ny, z, indices):
 
     cbar_ax = fig.add_axes([0.1, 0.05, 0.6, 0.02])
     cbar = fig.colorbar(cs, cax=cbar_ax,orientation='horizontal')
+    cbar.set_label('z500')
     plt.suptitle('z500 clusters')
     plt.show()
 
@@ -171,40 +191,27 @@ def plot_som(Nx, Ny, z, indices):
     return None
 
 
-def wind_distributions(bmus):
-    
-    distributions = np.empty(N_nodes)
-    
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, gridspec_kw = {'wspace':0.5, 'hspace':0.5})
-    vmin = np.min(obs)
-    vmax = np.max(obs)
-    
-    for i, ax in enumerate(axes.flatten()):
-        distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
-        ax.hist(distribution, range=(vmin,vmax),bins='auto')
-        ax.set_title('Avg wind speed ='+str(round(np.mean(distribution),2))+'m/s')
-
-    #plt.tight_layout()
-    plt.show()
-
-    return distributions
-
-
 
 if __name__ ==  "__main__":
-    step = 3
+
     lat = np.arange(44,66.5,0.5)[::-1]
     lon = np.arange(220,260.5,0.5)
     #gefs = xr.open_dataset('/Users/jpsotka/Nextcloud/geo-height-data/gh-2012-11-20-2017-12-25-0.nc')#.isel(step=step)
-    #gefs = xr.open_dataset('data/geo-height-2012-2017-12h-0.nc').isel(step=step)
-    gefs = xr.open_dataset('data/gh-reanalysis-2014-01.nc')
-
-    obs, gefs = prep_obs(xr.open_dataset('data/obs-all-12h.nc'), gefs, step)
+    #gefs1 = xr.open_dataset('data/geo-height-2012-2017-12h-0.nc').isel(step=step)
     
-    gefs, obs = prep_gefs(gefs, obs, step)
+
+    obs = cleaned_obs(res=6)
+    gefs = xr.open_dataset('gh-reanalysis-all-2012-2019.nc').sel(isobaricInhPa=500)
+    gefs = gefs_reanalysis(gefs)
+    obs, gefs = dates_obs_gefs(obs, gefs)
+    obs, gefs = prep_data(gefs, obs)
+
+    gefs_mean = np.mean(gefs) 
+    gefs_std = np.std(gefs)
+    gefs = (gefs - gefs_mean) / gefs_std  # normalizing each time frame
 
     Nx = 6
-    Ny = 2
+    Ny = 3
     N_nodes = Nx * Ny
     test_shapes(gefs)
     train = False
@@ -213,6 +220,8 @@ if __name__ ==  "__main__":
     else:
         with open('trained-map.pkl','rb') as handle:
             som = pickle.load(handle)
+
+    #monitor_training(som)
 
     z = som.z  # pattern of each node
     z_epochs = som.z_epochs  # pattern of each node through training
@@ -224,5 +233,4 @@ if __name__ ==  "__main__":
     plot_som(Nx, Ny, z, indices)
     #plt.plot(range(gefs.shape[0]), bmus, 'bo--')
     #plt.show()
-    wind_distributions(bmus)
     
