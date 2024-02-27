@@ -5,34 +5,13 @@ from fitter import Fitter, get_common_distributions, get_distributions
 from som_class import SOM, BMUs, BMU_frequency
 from matplotlib import pyplot as plt
 import xarray as xr
-from resampling import gefs_reanalysis, cleaned_obs, dates_obs_gefs
+from resampling import gefs_reanalysis, cleaned_obs, dates_obs_gefs, resample_mean
 from do_som import prep_data
-import scipy.stats
-import xskillscore as xs
+import scipy.stats as stats
+import properscoring as ps
+import datetime
 
 
-
-def wind_distributions(bmus):
-    
-    distributions = []
-    
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, gridspec_kw = {'wspace':0.5, 'hspace':0.5})
-    vmin = np.min(obs)
-    vmax = np.max(obs)
-    
-    for i, ax in enumerate(axes.flatten()):
-        distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
-        ax.hist(distribution, range=(vmin,vmax),bins='auto')
-        ax.set_title('Avg wind speed ='+str(round(np.mean(distribution),2))+'m/s')
-        distributions.append(distribution)
-
-    #plt.tight_layout()
-    plt.show()
-
-    with open('distributions.pkl','wb') as f:
-        pickle.dump(distributions,f)
-
-    return distributions
 
 
 def fit_hist(ds):
@@ -41,19 +20,22 @@ def fit_hist(ds):
     f.fit()
     print(f.summary())
 
-    dist = scipy.stats.nakagami(nu=0.765176, loc=1.6762, scale=4.758206) # from fitter
+    dist = stats.nakagami(nu=0.765176, loc=1.6762, scale=4.758206) # from fitter
     dist.cdf(5) # this will give % of obs under 5m/s
 
 
     return None
 
 
-def cdf(x):
-    dist = distributions[0]
-    dist1 = dist.where(dist[0]<x)
-    val = len(dist1)/len(dist)
+def obs_cdf(x_arr):
+    val = np.empty_like(x_arr)
+    for i in range(x_arr.shape[0]):
+        dist1 = np.argwhere(obs<=x_arr[i])
+        val[i] = len(dist1)/len(obs)
 
     return val
+
+
 
 
 if __name__ ==  "__main__":
@@ -63,22 +45,74 @@ if __name__ ==  "__main__":
     # obs, gefs = dates_obs_gefs(obs, gefs)
     # obs, gefs = prep_data(gefs, obs)
 
-    # with open('trained-map.pkl','rb') as handle:
-    #     som = pickle.load(handle)
-    # bmus = BMUs(som)
-    # Nx = 6
-    # Ny = 3
-    # N_nodes = Nx * Ny
 
-    #wind_distributions(bmus)
-    with open('distributions.pkl','rb') as handle:
-        distributions = pickle.load(handle)
+    with open('distributions-obs.pkl','rb') as handle:
+        obs_train = pickle.load(handle)
+    with open('distributions-6h-2x2-anomalies-all.pkl','rb') as handle:
+        dist = pickle.load(handle)
+    with open('trained-map-6h-2x2-anomalies-all.pkl', 'rb') as handle:
+        som = pickle.load(handle)
 
-    fit_hist(distributions[1])
-    y=[4,6.1,3.2,7,5,5.5]
+    # open all the things and choose dates
+    # let's start with day 7 00:00
+    t = np.array(int(7*24*1e9*60*60),dtype='timedelta64[ns]')
+    dates = slice("2022-01-01", "2023-01-01")
+    #climo = xr.open_dataset('data/climo-6h.nc')  # split into morning, day, evening, night
+    obs_test = cleaned_obs(dates,6)
 
-    crps = xs.crps_quadrature(y,cdf)
-    print(crps)
+    dates = slice("2021-12-25","2022-12-25")
+    z_forecast = xr.open_dataset('data/gefs-z-gh-2021-04-18-2023-02-18-0.nc').sel(time=dates)
+    z_forecast = resample_mean(z_forecast,'gefs').sel(step=t)  # resampled because 3-hourly, day 7 00:00
+
+    anomaly = True  # get rid of seasonal anomaly using 30-day rolling avg
+    if anomaly:
+        gefs = xr.open_dataset('era-reanalysis-2012-2022-6h.nc')
+        gefs['longitude'] = gefs['longitude'] + 360
+        gefs_smoothed = gefs.rolling(time=124,center=True).mean()
+        clim = gefs_smoothed.groupby("time.dayofyear").mean(dim=["time"])
+        z_forecast = z_forecast.groupby("time.dayofyear") - clim
+
+    wind_forecast = xr.open_dataset('gefs-wind-2020-12-17-2023-12-31-interpolated-0.nc').sel(time=dates,step=t)
+
+    # calculate which node each forecast belongs to
+    BMUs = np.zeros(len(z_forecast.time), dtype='int')
+
+    for kk, ob in enumerate(z_forecast.gh):
+        ob = np.reshape(ob.to_numpy(),(ob.latitude.shape[0]*ob.longitude.shape[0]))
+        BMU = np.argmin(np.linalg.norm(ob - som.z_raw, axis=1))
+        BMUs[kk] = BMU
+
+    
+    # lets put together all the data for each time step and calculate the score!!!
+    crps_som = np.empty((len(dist),BMUs.shape[0]))  # (nodes, forecasts)
+    crps_som.fill(np.nan)
+    crps_clim = np.empty((len(dist),BMUs.shape[0]))
+    crps_clim.fill(np.nan)
+    crps_wind = np.empty((len(dist),BMUs.shape[0]))
+    crps_wind.fill(np.nan)
+    obs_node = np.empty((len(dist),BMUs.shape[0]))
+    obs_node.fill(np.nan)
+
+    for i in range(BMUs.shape[0]):
+        BMU = BMUs[i]
+        dist_forecast = dist[BMU]
+        date_init = z_forecast.isel(time=i).time.values
+        date_forecast = date_init + t
+        month = date_forecast.astype('datetime64[M]').astype(int) % 12 + 1
+        day = (date_forecast.astype('datetime64[D]') - date_forecast.astype('datetime64[M]')).astype(int) + 1
+        #cl = climo.sel(day=day,month=month).nighttime.values  # deterministic climo - don't need right now
+        wind = wind_forecast.sel(time=date_init).wind.values
+        ob = obs_test.to_xarray().sel(index=date_forecast).Wind.values
+        obs_node[BMU,i] = ob
+        crps_som[BMU,i] =(ps.crps_ensemble(ob, dist_forecast))
+        crps_clim[BMU,i] =(ps.crps_ensemble(ob, obs_train))
+        crps_wind[BMU,i] =(ps.crps_ensemble(ob, wind))
+
+    for i in range(crps_som.shape[0]):
+        
+        print(np.nanmean(1-crps_som[i,:]/crps_clim[i,:]))
+
+    print('done')
 
 
     

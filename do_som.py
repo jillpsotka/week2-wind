@@ -11,7 +11,7 @@ import matplotlib.ticker as mticker
 import pickle
 from cmcrameri import cm
 import os
-from resampling import gefs_reanalysis, cleaned_obs, dates_obs_gefs
+from resampling import era5_prep, resample_mean, low_pass_filter, dates_obs_gefs
 
 
 def prep_data(ds, obs):
@@ -71,17 +71,11 @@ def visualize_normalization(gefs_arr):
 
 
 def train_som(gefs_arr, obs_arr):
-    # normalize data (this is actually the z score, could try other methods of standardization)
-    # TO DO: much to think about
-    gefs_mean = np.mean(gefs) 
-    gefs_std = np.std(gefs)
-    gefs_arr = (gefs_arr - gefs_mean) / gefs_std  # normalizing each time frame
-    # normalization from 510 did the whole array
 
     #pca_gefs(gefs_arr)
 
-    learning_rate = 1e-3
-    N_epochs = 200
+    learning_rate = 1e-4
+    N_epochs = 100
     colours_list = 'default2'
 
     som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth=4, colours_list=colours_list)
@@ -92,8 +86,9 @@ def train_som(gefs_arr, obs_arr):
     som.train_map(learning_rate)
     toc = time.perf_counter()
     print(f'Finished training map in {toc - tic:0.2f} seconds. Saving...')
+    som.z_raw = som.z*gefs_std + gefs_mean
 
-    with open('trained-map.pkl', 'wb') as handle:
+    with open('trained-map-'+title, 'wb') as handle:
         pickle.dump(som, handle)
 
     return som
@@ -103,11 +98,11 @@ def monitor_training(som):
     z_epochs = som.z_epochs
     diff = []
     for i in range(1,z_epochs.shape[2]):
-        update = np.sum(z_epochs[:,:,i] - z_epochs[:,:,i-1])
+        update = np.sum(np.square(z_epochs[:,:,i] - z_epochs[:,:,i-1]))
         diff.append(update)
-
     plt.plot(diff)
     plt.show()
+    print(np.min(np.array(diff)))
     
     return None
 
@@ -191,46 +186,74 @@ def plot_som(Nx, Ny, z, indices):
     return None
 
 
+def wind_distributions(bmus):
+    
+    distributions = []
+    
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, gridspec_kw = {'wspace':0.5, 'hspace':0.5})
+    vmin = np.min(obs)
+    vmax = np.max(obs)
+    
+    for i, ax in enumerate(axes.flatten()):
+        distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
+        ax.hist(distribution, range=(vmin,vmax),bins='auto')
+        ax.set_title('Avg wind speed ='+str(round(np.mean(distribution),2))+'m/s')
+        distributions.append(distribution)
+
+    #plt.tight_layout()
+    plt.show()
+
+    with open('distributions-'+title,'wb') as f:
+        pickle.dump(distributions,f)
+
+    return distributions
+
+
+
 
 if __name__ ==  "__main__":
 
     lat = np.arange(44,66.5,0.5)[::-1]
     lon = np.arange(220,260.5,0.5)
-    #gefs = xr.open_dataset('/Users/jpsotka/Nextcloud/geo-height-data/gh-2012-11-20-2017-12-25-0.nc')#.isel(step=step)
-    #gefs1 = xr.open_dataset('data/geo-height-2012-2017-12h-0.nc').isel(step=step)
-    
+ 
+    obs = cleaned_obs(res=6)  # change to resampling
+    gefs = xr.open_dataset('era-reanalysis-2012-2022-6h.nc')
 
-    obs = cleaned_obs(res=6)
-    gefs = xr.open_dataset('gh-reanalysis-all-2012-2019.nc').sel(isobaricInhPa=500)
-    gefs = gefs_reanalysis(gefs)
+    anomaly = True  # get rid of seasonal anomaly using 30-day rolling avg
+    if anomaly:
+        gefs_smoothed = gefs.rolling(time=124,center=True).mean()
+        clim = gefs_smoothed.groupby("time.dayofyear").mean(dim=["time"])
+        gefs = gefs.groupby("time.dayofyear") - clim
+
     obs, gefs = dates_obs_gefs(obs, gefs)
     obs, gefs = prep_data(gefs, obs)
 
+    # normalize data (this is actually the z score)
     gefs_mean = np.mean(gefs) 
     gefs_std = np.std(gefs)
     gefs = (gefs - gefs_mean) / gefs_std  # normalizing each time frame
 
-    Nx = 6
-    Ny = 3
+    Nx = 2
+    Ny = 2
     N_nodes = Nx * Ny
-    test_shapes(gefs)
-    train = False
+    title = '6h-2x2-anomalies-all.pkl'
+    #test_shapes(gefs)
+    train = True
     if train:
         som = train_som(gefs, obs)
     else:
-        with open('trained-map.pkl','rb') as handle:
+        with open('trained-map-6h-3x6-anomalies.pkl','rb') as handle:
             som = pickle.load(handle)
-
-    #monitor_training(som)
-
-    z = som.z  # pattern of each node
-    z_epochs = som.z_epochs  # pattern of each node through training
+    monitor_training(som)
+    
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
     bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
+    wind_distributions(bmus)
     freq = BMU_frequency(som)  # frequency of each node
     QE = som.QE()  # quantization error
     TE = som.TE()  # topographic error
-    plot_som(Nx, Ny, z, indices)
+
+    plot_som(Nx, Ny, som.z_raw, indices)
     #plt.plot(range(gefs.shape[0]), bmus, 'bo--')
     #plt.show()
     
