@@ -10,8 +10,17 @@ import cartopy.feature as cfeature
 import matplotlib.ticker as mticker
 import pickle
 from cmcrameri import cm
+import matplotlib.cm as comap
 import os
 from resampling import era5_prep, resample_mean, low_pass_filter, dates_obs_gefs
+from matplotlib.colors import Normalize
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib as mpl
+
+mpl.rcParams['axes.labelsize'] = 10
+mpl.rcParams['axes.titlesize'] = 12
+mpl.rcParams['ytick.labelsize'] = 8
+mpl.rcParams['xtick.labelsize'] = 8
 
 
 def prep_data(ds, obs):
@@ -30,12 +39,12 @@ def prep_data(ds, obs):
 
 
 
-def pca_gefs(gefs):
+def pca_gefs(era):
     # do PCA to see the ratio of nodes in the ideal map
-    # I checked: it is correct that gefs is in form (time, space)
+    # I checked: it is correct that era is in form (time, space)
     # this makes the eigvecs the same shape as the grid, and the PCs have length time
     pca = PCA(n_components=10)
-    PCs = pca.fit_transform(gefs)
+    PCs = pca.fit_transform(era)
     frac_var = pca.explained_variance_ratio_
     var = pca.explained_variance_
     std = var ** 0.5
@@ -46,8 +55,8 @@ def pca_gefs(gefs):
 
 
 def visualize_normalization(gefs_arr):
-    gefs_mean = np.mean(gefs)  # this is the mean of each time step
-    gefs_std = np.std(gefs)
+    gefs_mean = np.mean(era)  # this is the mean of each time step
+    gefs_std = np.std(era)
     gefs_arr1 = (gefs_arr - gefs_mean) / gefs_std  # normalizing each time frame
     gefs_arr2 = (gefs_arr1 * gefs_std) + gefs_mean  # reconstructed
     # normalization from 510 did the whole array not just one axis - anomaly vibes
@@ -75,7 +84,7 @@ def train_som(gefs_arr, obs_arr):
     #pca_gefs(gefs_arr)
 
     learning_rate = 1e-4
-    N_epochs = 100
+    N_epochs = 50
     colours_list = 'default2'
 
     som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth=4, colours_list=colours_list)
@@ -85,7 +94,7 @@ def train_som(gefs_arr, obs_arr):
     tic = time.perf_counter()
     som.train_map(learning_rate)
     toc = time.perf_counter()
-    print(f'Finished training map in {toc - tic:0.2f} seconds. Saving...')
+    print(f'Finished training map in {(toc - tic)/60:0.2f} minutes. Saving...')
     som.z_raw = som.z*gefs_std + gefs_mean
 
     with open('trained-map-'+title, 'wb') as handle:
@@ -149,8 +158,8 @@ def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
     vmin = np.min(z)
     vmax = np.max(z)  # colorbar range
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',figsize=(Nx*3,Ny*2),subplot_kw={'projection': proj, 'aspect':1.4},gridspec_kw = {'wspace':0.3, 'hspace':0.05})
-
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*4,Ny*4),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.03, 'hspace':0.1})
+    im = comap.ScalarMappable(norm=Normalize(vmin,vmax),cmap=cm.acton)
     for kk, ax in enumerate(axes.flatten()):
         var = z[indices[kk],:].reshape(45,81)
         ax.set_extent(([219,261,43.25,65.25]))
@@ -170,19 +179,23 @@ def plot_som(Nx, Ny, z, indices):
         gl = ax.gridlines(crs=ccrs.PlateCarree(), linewidth=0.8, color='black', alpha=0.2,linestyle='--')
         # Manipulate gridlines number and spaces
         gl.ylocator = mticker.FixedLocator(np.arange(-90,90,10))
-        gl.xlocator = mticker.FixedLocator(np.arange(-180, 180, 10)) 
+        gl.xlocator = mticker.FixedLocator(np.arange(-180, 180, 10))
+        gl.xlabel_style = {'size': 8,'rotation':25}
+        gl.ylabel_style = {'size': 8} 
         if kk > (Ny*Nx) - Nx - 1:
             gl.bottom_labels = True
         if kk % Nx == 0:
             gl.left_labels = True
 
-    cbar_ax = fig.add_axes([0.1, 0.05, 0.6, 0.02])
-    cbar = fig.colorbar(cs, cax=cbar_ax,orientation='horizontal')
-    cbar.set_label('z500')
+    #cbar_ax = fig.add_axes([0.05, 0.07, 0.45*Nx, 0.03])
+    cbar = fig.colorbar(im,ax=axes,fraction=0.046, pad=0.04,orientation='horizontal')
+    if anomaly:
+        cbar.set_label('z500 anomaly (m)')
+    else:
+        cbar.set_label('z500 (m)')
     plt.suptitle('z500 clusters')
     plt.show()
 
-    
     return None
 
 
@@ -197,7 +210,7 @@ def wind_distributions(bmus):
     for i, ax in enumerate(axes.flatten()):
         distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
         ax.hist(distribution, range=(vmin,vmax),bins='auto')
-        ax.set_title('Avg wind speed ='+str(round(np.mean(distribution),2))+'m/s')
+        ax.set_title('Mean ='+str(round(np.mean(distribution),2))+'m/s, Median ='+str(round(np.median(distribution),2))+'m/s')
         distributions.append(distribution)
 
     #plt.tight_layout()
@@ -213,38 +226,52 @@ def wind_distributions(bmus):
 
 if __name__ ==  "__main__":
 
-    lat = np.arange(44,66.5,0.5)[::-1]
-    lon = np.arange(220,260.5,0.5)
- 
-    obs = cleaned_obs(res=6)  # change to resampling
-    gefs = xr.open_dataset('era-reanalysis-2012-2022-6h.nc')
-
-    anomaly = True  # get rid of seasonal anomaly using 30-day rolling avg
-    if anomaly:
-        gefs_smoothed = gefs.rolling(time=124,center=True).mean()
-        clim = gefs_smoothed.groupby("time.dayofyear").mean(dim=["time"])
-        gefs = gefs.groupby("time.dayofyear") - clim
-
-    obs, gefs = dates_obs_gefs(obs, gefs)
-    obs, gefs = prep_data(gefs, obs)
-
-    # normalize data (this is actually the z score)
-    gefs_mean = np.mean(gefs) 
-    gefs_std = np.std(gefs)
-    gefs = (gefs - gefs_mean) / gefs_std  # normalizing each time frame
-
+    # setup
+    res = 48  # time resolution in hours
     Nx = 2
     Ny = 2
     N_nodes = Nx * Ny
-    title = '6h-2x2-anomalies-all.pkl'
-    #test_shapes(gefs)
-    train = True
+    title = '48h-2x2-anomalies-all.pkl'
+    period=slice("2009-10-01","2020-10-01")
+    lat = np.arange(44,66.5,0.5)[::-1]
+    lon = np.arange(220,260.5,0.5)
+    train = False
+    anomaly = True  # get rid of seasonal anomaly using 30-day rolling avg
+
+    # data
+    print('Prepping data...')
+
+    obs = xr.open_dataset('data/bm_cleaned_all.nc').sel(index=period)
+    obs = low_pass_filter(obs,'obs',res)
+
+    era = xr.open_dataset('era-2009-2022.nc').sel(time=period)
+    era = low_pass_filter(era,'era',res)
+
+    if anomaly:
+        #smoothed = era.rolling(time=int(5*(24/res)),center=True).mean()
+        #smoothed = smoothed.rolling(time=int(31*(24/res)),center=True).mean()
+        clim = era.groupby("time.dayofyear").mean(dim=["time"])
+        era = era.groupby("time.dayofyear") - clim
+
+    obs, era = dates_obs_gefs(obs, era)
+    obs, era = prep_data(era, obs)
+
     if train:
-        som = train_som(gefs, obs)
+
+        # normalize data (this is actually the z score)
+        gefs_mean = np.mean(era) 
+        gefs_std = np.std(era)
+        era = (era - gefs_mean) / gefs_std  # normalizing each time frame
+
+        #test_shapes(era)
+
+        print('Training map...')
+        som = train_som(era, obs)
     else:
-        with open('trained-map-6h-3x6-anomalies.pkl','rb') as handle:
+        with open('trained-map-'+title,'rb') as handle:
             som = pickle.load(handle)
-    monitor_training(som)
+
+    #monitor_training(som)
     
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
     bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
@@ -254,6 +281,6 @@ if __name__ ==  "__main__":
     TE = som.TE()  # topographic error
 
     plot_som(Nx, Ny, som.z_raw, indices)
-    #plt.plot(range(gefs.shape[0]), bmus, 'bo--')
+    #plt.plot(range(era.shape[0]), bmus, 'bo--')
     #plt.show()
     
