@@ -40,30 +40,30 @@ def low_pass_filter(ds,type_str,res):
 
     if type_str == 'era' or type_str == 'gefs':
         fs = (1/60)/60       # sample rate, Hz (1/s)    (1 hr)
-        cutoff=0.02          # fraction of nyquist frequency, smaller fraction will do more, 0.02 turns gh data into ~3-4 day patterns
+        cutoff=0.03          # fraction of nyquist frequency, smaller fraction will do more, 0.02 turns gh data into ~3-4 day patterns
 
         b, a = signal.butter(5, cutoff, btype='lowpass')
-        ds = ds.interpolate_na(dim='time',method='linear')
+        #ds = ds.interpolate_na(dim='time',method='linear')
         dUfilt = signal.filtfilt(b, a, ds.gh.values,axis=0)  # axis has to be time axis
         ds.gh.values = dUfilt
-        ds = ds.resample(time=res_str,origin=datetime(2007,12,1,origin)).first()  # resample and keep instantaneous points
+        ds = ds.resample(time=res_str,origin=datetime(2007,12,1,origin)).mean()  # resample and take mean
 
     elif type_str == 'obs':
         # first deal with the fact that obs have nan values which mess up the filter
         # interplote the nans but save their indices to discard afterwards
         nan_indices=np.argwhere(np.isnan(ds.rolling(index=int(res*12)+1,min_periods=int(res*12/2),center=True).mean().Wind.values)).squeeze()  # this will tag any periods that are >1/2 nan
         ds.Wind[nan_indices] = np.nan
-        ds = ds.interpolate_na(dim='index',method='linear').dropna(dim='index')
+        ds = ds.interpolate_na(dim='index',method='linear',fill_value=5)
 
         fs = (1/5)/60       # sample rate, Hz (1/s)    (5 min)
-        cutoff=0.002        # 0.02 ~6hrs, 0.01 ~ 12hrs, 0.003 ~1day, 0.002 ~2days, 0.001 ~3days, 0.0008 ~4days, 0.0007 ~6days,0.0006 ~7days
+        cutoff=0.02        # 0.02 ~6hrs, 0.01 ~ 12hrs, 0.003 ~1day
         b, a = signal.butter(5, cutoff, btype='lowpass')
 
         dUfilt = signal.filtfilt(b, a, ds.Wind.values,axis=0)  # axis has to be time axis
 
         dUfilt[nan_indices] = np.nan  # get rid of nan again
         ds.Wind.values = dUfilt
-        ds = ds.resample(index=res_str,origin=datetime(2007,12,1,origin)).first()  # resample and keep instantaneous points
+        ds = ds.resample(index=res_str,origin=datetime(2007,12,1,origin)).mean()  # resample and take mean
 
     return ds
 
@@ -117,16 +117,16 @@ def dates_obs_gefs(obs, gefs):
 
 
 if __name__ == "__main__":
-    dates = slice("2012-11-20", "2022-12-31")
+    #dates = slice("2012-11-20", "2022-12-31")
 
     #obs = cleaned_obs(dates)
-    obs = xr.open_dataset('data/bm_cleaned_all.nc').sel(index='2015')
+    #obs = xr.open_dataset('data/bm_cleaned_all.nc').sel(index='2015')
 
     #gefs = xr.open_dataset('data/gh-reanalysis-2014-01.nc').sel(isobaricInhPa=500)
     #gefs = gefs_reanalysis(gefs, period=dates, res=6)
-    #era = xr.open_dataset('era-2009-2022.nc').sel(time='2015')
-    low_pass_filter(obs,'obs',12)
-    #era = era5_prep(era)
+    era = xr.open_dataset('era-2009-2020-temp.nc')
+    #low_pass_filter(obs,'obs',12)
+    era = era5_prep(era)
     #era = resample_mean(era)
     #era = era5(era, dates)
 

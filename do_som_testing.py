@@ -12,12 +12,13 @@ import pickle
 from cmcrameri import cm
 import matplotlib.cm as comap
 import os
-from resampling import era5_prep, resample_mean, low_pass_filter, dates_obs_gefs
+from resampling import resample_mean, low_pass_filter, dates_obs_gefs
 from matplotlib.colors import Normalize
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib as mpl
+from sklearn.cluster import KMeans
 from scipy import signal
 import scipy.stats as stats
+
 
 
 mpl.rcParams['axes.labelsize'] = 10
@@ -94,14 +95,12 @@ def train_som(gefs_arr, obs_arr):
     som.initialize_map(node_shape='hex')
 
     # train
-    tic = time.perf_counter()
     som.train_map(learning_rate)
-    toc = time.perf_counter()
-    print(f'Finished training map in {(toc - tic)/60:0.2f} minutes. Saving...')
+
     som.z_raw = som.z*gefs_std + gefs_mean
 
-    with open('trained-map-'+title, 'wb') as handle:
-        pickle.dump(som, handle)
+    # with open('trained-map-'+title, 'wb') as handle:
+    #     pickle.dump(som, handle)
 
     return som
 
@@ -125,7 +124,7 @@ def test_shapes(gefs_arr):
     x_labels=[]
 
     learning_rate = 1e-3
-    N_epochs = 200
+    N_epochs = 50
     colours_list = 'pink_blue_red_purple'
 
     QE = []
@@ -161,7 +160,7 @@ def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
     vmin = np.min(z)
     vmax = np.max(z)  # colorbar range
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*2,Ny*2),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.03, 'hspace':0.1})
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*4,Ny*4),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.03, 'hspace':0.1})
     im = comap.ScalarMappable(norm=Normalize(vmin,vmax),cmap=cm.acton)
     for kk, ax in enumerate(axes.flatten()):
         var = z[indices[kk],:].reshape(45,81)
@@ -206,26 +205,22 @@ def wind_distributions(bmus):
     
     distributions = []
     
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, figsize=(Nx*2,Ny*2),gridspec_kw = {'wspace':0.5, 'hspace':0.5})
-    vmin = np.min(obs)
-    vmax = np.max(obs)
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, gridspec_kw = {'wspace':0.5, 'hspace':0.5})
+    #vmin = np.min(obs)
+    #vmax = np.max(obs)
     
     for i, ax in enumerate(axes.flatten()):
         distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
-        ax.hist(distribution, range=(vmin,vmax),bins='auto',color='black')
-        ax.set_title('Mean ='+str(round(np.mean(distribution),2))+'m/s, Median ='+str(round(np.median(distribution),2))+'m/s')
-        ind = int((np.mean(distribution)-3)*(255)/(10-3))
-        col_ar = cm.acton.colors[ind]
-        col_tuple = tuple(col_ar)
-        ax.patch.set_facecolor(col_tuple)
-        ax.patch.set_alpha(0.9)
+        #ax.hist(distribution, range=(vmin,vmax),bins='auto')
+        #ax.set_title('Mean ='+str(round(np.mean(distribution),2))+'m/s, Median ='+str(round(np.median(distribution),2))+'m/s')
         distributions.append(distribution)
+    plt.close(fig)
 
     #plt.tight_layout()
-    plt.show()
+    #plt.show()
 
-    with open('distributions-'+title,'wb') as f:
-        pickle.dump(distributions,f)
+    # with open('distributions-'+title,'wb') as f:
+    #     pickle.dump(distributions,f)
 
     return distributions
 
@@ -233,107 +228,145 @@ def wind_distributions(bmus):
 
 
 if __name__ ==  "__main__":
-
     # setup
+    sizes = [(5,3),(5,4),(5,5),(6,2),(6,3),(6,4),(6,5),(6,6),(7,3),(7,4),(7,5),(7,6),(7,7),(8,3),(8,4),(8,5),(8,6),(8,7),(8,8),(9,3),(9,4),(9,5),(9,6),(9,7),(9,8),(9,9)]  # map size
+    lat_dif = [9,11]  # domain size (degrees on each side of the center)
+    lon_dif = [18,20]
     res = 24  # time resolution in hours
-    Nx = 7
-    Ny = 5
-    N_nodes = Nx * Ny
-    title = '24h-7x5-anomalies-all.pkl'
-    period=slice("2009-10-01","2020-10-01")
-    lat = np.arange(44,66.5,0.5)[::-1]
-    lon = np.arange(220,260.5,0.5)
-    train = False
+    k_m = False
+
+    EV_max = 0
+    PF_max = 0
+    EV_list = []
+    PF_list = []
+    TE_list = []
+    KS_list = []
     anomaly = True  # get rid of seasonal anomaly using 30-day rolling avg
-    use_wind = True  # concat obs into training data to guide map
-    number = 600 # weiht of wind
+    period=slice("2009-10-01","2020-10-01")
+    obs_full = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc').sel(index=period)
+    obs_full = low_pass_filter(obs_full,'obs',res)
+    era_full = xr.open_dataset('era-2009-2022-500.nc').sel(time=period)
 
-    # data
-    print('Prepping data...')
+    title = '24h-anomalies-som'
 
-    obs = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc').sel(index=period)
-    obs = low_pass_filter(obs,'obs',res)
+    with open('stats-'+title+'.txt', 'w') as file:
+        file.write('Nx,Ny,lat,lon,TE,EV,PF,KS frac')
 
-    era = xr.open_dataset('era-2009-2022-500.nc').sel(time=period)
-    era = low_pass_filter(era,'era',res)
+    for dom in range(len(lat_dif)):
+        tic = time.perf_counter()
 
-    if anomaly:
-        clim = era.groupby("time.dayofyear").mean(dim=["time"])
-        clim_concat = xr.concat([clim.isel(dayofyear=slice(330,366)),clim,clim.isel(dayofyear=slice(0,36))],dim='dayofyear')
-        cutoff=0.03
-        b, a = signal.butter(5, cutoff, btype='lowpass')
-        dUfilt = signal.filtfilt(b, a, clim_concat.gh.values,axis=0)
-        dUfilt = dUfilt[36:-36,:,:]
-        clim.gh.values = dUfilt
-        era = era.groupby("time.dayofyear") - clim
+        lat_offset = lat_dif[dom]
+        lon_offset = lon_dif[dom]
+        lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
+        lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
 
-    obs, era = dates_obs_gefs(obs, era)
-    obs, era = prep_data(era, obs)
+        era = era_full.sel(latitude=lat,longitude=lon-360)
+        era = low_pass_filter(era,'era',res)
 
-    # normalize data (this is actually the z score)
-    gefs_mean = np.mean(era) 
-    gefs_std = np.std(era)
-    era = (era - gefs_mean) / gefs_std  # normalizing each time frame
-    obs_mean = np.mean(obs) 
-    obs_std = np.std(obs)
-    obs = (obs - obs_mean) / obs_std  # normalizing each time frame
+        if anomaly:
+            clim = era.groupby("time.dayofyear").mean(dim=["time"])
+            clim_concat = xr.concat([clim.isel(dayofyear=slice(330,366)),clim,clim.isel(dayofyear=slice(0,36))],dim='dayofyear')
+            cutoff=0.03
+            b, a = signal.butter(5, cutoff, btype='lowpass')
+            dUfilt = signal.filtfilt(b, a, clim_concat.gh.values,axis=0)
+            dUfilt = dUfilt[36:-36,:,:]
+            clim.gh.values = dUfilt
 
-    if use_wind:  # add wind obs to training to try to optimize
-        obs_repeat = np.repeat(obs[:,np.newaxis],number,axis=1)  # (time, repeats)
-        era = np.concatenate([era,obs_repeat],axis=1) # adding repeated obs onto end of lat/lon data
+            era = era.groupby("time.dayofyear") - clim
+
+        obs, era = dates_obs_gefs(obs_full, era)
+        obs, era = prep_data(era, obs)
+
+        # normalize data (this is actually the z score)
+        gefs_mean = np.mean(era) 
+        gefs_std = np.std(era)
+        era = (era - gefs_mean) / gefs_std  # normalizing each time frame
+        obs_mean = np.mean(obs) 
+        obs_std = np.std(obs)
+        obs = (obs - obs_mean) / obs_std  # normalizing each time frame
+
+        for (Nx, Ny) in sizes:
+            N_nodes = Nx * Ny
+
+            if k_m:
+                kmeans = KMeans(n_clusters=2, random_state=0).fit(era)
+
+                #you can see the labels with:
+                print(kmeans.labels_)
+
+                # the output will be something like:
+                #array([0, 0, 0, 1, 1, 1], dtype=int32)
+                # the values (0,1) tell you to what cluster does every of your data points correspond to
+
+                #or see were the centres of your clusters are
+                kmeans.cluster_centers_
+
+            som = train_som(era, obs)
+
+            #monitor_training(som)
+            
+            indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
+            bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
+            obs = (obs*obs_std) + obs_mean
+            distributions = wind_distributions(bmus)
+            freq = BMU_frequency(som)  # frequency of each node
+            QE = som.QE()  # quantization error
+            TE = som.TE()  # topographic error
+
+            #plot_som(Nx, Ny, som.z_raw[:,:-number], indices)
+
+            # some stats on how good the clustering is
+            WSS_nodes = np.empty(N_nodes)
+            dist_means = np.empty(N_nodes)
+            BSS_nodes = np.empty(N_nodes)
+
+            for i in range(len(distributions)):  # for each node
+                mean = np.mean(distributions[i])
+                WSS_nodes[i] = np.sum(np.square(distributions[i] - mean))
+                dist_means[i] = mean
+
+            WSS = np.sum(WSS_nodes)
+            TSS = np.sum(np.square(obs - np.mean(dist_means)))
+            EV = 1 - WSS/TSS  # explained variance
+
+            sig_count = 0
+            for i in range(len(distributions)):
+                BSS_nodes[i] = np.square(dist_means[i] - np.mean(dist_means))
+                # K-S test
+                other = obs[np.where(bmus!=i)[0]]  # the rest of the obs that are not in this node
+                n = distributions[i].shape[0]
+                m = other.shape[0]
+                crit = 1.36*np.sqrt((n+m)/(n*m))  # 1.36 is for 95% confidence, 1.07 for 80 1.22 for 90 1.52 for 98 1.63 for 99
+                ks = stats.ks_2samp(distributions[i], other)  # rejection means the distirbutions are different
+                if ks.statistic > crit and ks.pvalue < 0.05:  # rejection of null
+                    sig_count +=1
+
+            ks_sig_frac = sig_count / N_nodes  # perentage of nodes that have significantly different distribution
+            n = obs.shape[0]
+            PF = (np.sum(BSS_nodes)/(N_nodes-1)) / (WSS/(n-N_nodes))  # pseudo-F statistic
+
+            if EV > EV_max and PF > PF_max:
+                print('New maximums found. Num nodes ',N_nodes, ', and lat offset', lat_offset)
+                EV_max = EV
+                PF_max = PF
 
 
-    if train:
-        #test_shapes(era)
+            with open('stats-'+title+'.txt','a') as file:
+                file.write('\n'+str(Nx)+','+str(Ny)+','+str(lat_offset)+','+str(lon_offset)+','+str(TE)+','+str(EV)+','+str(PF)+','+str(ks_sig_frac))
+            EV_list.append(EV)
+            PF_list.append(PF)
+            TE_list.append(TE)
+            KS_list.append(ks_sig_frac)
+        
+        toc = time.perf_counter()
+        print('Done that domain size',dom+1,f'/3 in {(toc - tic)/60:0.2f} minutes.')
+    fig, ax = plt.subplots(1)
+    ax.plot(EV_list,label='EV')
+    ax.plot(PF_list,label='PF')
+    ax.plot(TE_list,label='TE')
+    plt.legend()
+    ax2 = ax.twinx()
+    ax2.plot(KS_list,color='black')
+    plt.savefig('map-error-testing-'+title+'.png')
 
-        print('Training map...')
-        som = train_som(era, obs)
-    else:
-        with open('trained-map-'+title,'rb') as handle:
-            som = pickle.load(handle)
-
-    #monitor_training(som)
-    
-    indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
-    bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
-    obs = (obs*obs_std) + obs_mean
-    distributions = wind_distributions(bmus)
-    freq = BMU_frequency(som)  # frequency of each node
-    QE = som.QE()  # quantization error
-    TE = som.TE()  # topographic error
-
-    plot_som(Nx, Ny, som.z_raw[:,:-number], indices)
-
-    # some stats on how good the clustering is
-
-    WSS_nodes = np.empty(N_nodes)
-    dist_means = np.empty(N_nodes)
-    BSS_nodes = np.empty(N_nodes)
-
-    for i in range(len(distributions)):  # for each node
-        mean = np.mean(distributions[i])
-        WSS_nodes[i] = np.sum(np.square(distributions[i] - mean))
-        dist_means[i] = mean
-
-    WSS = np.sum(WSS_nodes)
-    TSS = np.sum(np.square(obs - np.mean(dist_means)))
-    EV = 1 - WSS/TSS  # explained variance
-
-    sig_count = 0
-    for i in range(len(distributions)):
-        BSS_nodes[i] = np.square(dist_means[i] - np.mean(dist_means))
-        # K-S test
-        other = obs[np.where(bmus!=i)[0]]  # the rest of the obs that are not in this node
-        n = distributions[i].shape[0]
-        m = other.shape[0]
-        crit = 1.36*np.sqrt((n+m)/(n*m))  # 1.36 is for 95% confidence, 1.07 for 80 1.22 for 90 1.52 for 98 1.63 for 99
-        ks = stats.ks_2samp(distributions[i], other)  # rejection means the distirbutions are different
-        if ks.statistic > crit and ks.pvalue < 0.05:  # rejection of null
-            sig_count +=1
-
-    ks_sig_frac = sig_count / N_nodes  # perentage of nodes that have significantly different distribution
-    n = obs.shape[0]
-    PF = (np.sum(BSS_nodes)/(N_nodes-1)) / (WSS/(n-N_nodes))  # pseudo-F statistic
-    #plt.plot(range(era.shape[0]), bmus, 'bo--')
-    #plt.show()
-    
+        
