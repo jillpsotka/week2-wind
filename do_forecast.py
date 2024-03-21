@@ -38,19 +38,23 @@ if __name__ ==  "__main__":
     dates_test = slice("2020-10-01","2021-12-31")
     dates_obs = slice("2020-10-01","2021-12-31")
     anomaly = True
-    number=600
+    lat_offset = 9
+    lon_offset = 18
+    lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
+    lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
+    #number=0
 
     # let's start with day 7 00:00
     t = np.array(int(7*24*1e9*60*60),dtype='timedelta64[ns]')
 
     print('Opening things...')
     # som results
-    with open('distributions-'+str(res)+'h-2x2-anomalies-all.pkl','rb') as handle:
+    with open('distributions-'+str(res)+'h-8x2-anomalies-all.pkl','rb') as handle:
         dist = pickle.load(handle)  # distributions associated with each map node
-    with open('trained-map-'+str(res)+'h-2x2-anomalies-all.pkl', 'rb') as handle:
+    with open('trained-map-'+str(res)+'h-8x2-anomalies-all.pkl', 'rb') as handle:
         som = pickle.load(handle)
 
-    obs =  xr.open_dataset('data/bm_cleaned_all.nc')
+    obs =  xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc')
     obs_test = low_pass_filter(obs.sel(index=dates_obs),'obs',res)  # test dates and resample
     obs_train = low_pass_filter(obs.sel(index=dates_train),'obs',res)
     clim_det = get_deterministic_climo(obs_train)
@@ -60,7 +64,7 @@ if __name__ ==  "__main__":
     #z_forecast = low_pass_filter(z_forecast,'gefs',res).sel(step=t)  # resampled, day 7 00:00
     #z_forecast['longitude'] = z_forecast['longitude'] - 360  # so that it matches era
 
-    era = xr.open_dataset('era-2009-2022.nc')#.sel(time=dates_train)
+    era = xr.open_dataset('era-2009-2022-500.nc').sel(longitude=lon-360,latitude=lat)
     era = low_pass_filter(era,'era',res)
 
     if anomaly:
@@ -81,7 +85,7 @@ if __name__ ==  "__main__":
 
     for kk, ob in enumerate(z_forecast.gh):
         ob = np.reshape(ob.to_numpy(),(ob.latitude.shape[0]*ob.longitude.shape[0]))
-        BMU = np.argmin(np.linalg.norm(ob - som.z_raw[:,:-number], axis=1))
+        BMU = np.argmin(np.linalg.norm(ob - som.z_raw, axis=1))
         BMUs[kk] = BMU
 
     print('Doing stats....')
@@ -150,7 +154,7 @@ if __name__ ==  "__main__":
 
 
     for i in range(crps_som.shape[0]):
-        
+        print('node',i)
         print('crpss',np.nanmean(1-crps_som[i,:]/crps_clim[i,:])) 
         print('mae clim',np.nanmean(mae_clim[i,:]))
         print('mae mean of som dist',np.nanmean(mae_som_mean[i,:]))

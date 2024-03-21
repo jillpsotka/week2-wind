@@ -161,10 +161,10 @@ def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
     vmin = np.min(z)
     vmax = np.max(z)  # colorbar range
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*2,Ny*2),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.03, 'hspace':0.1})
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*2,Ny*2),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.02, 'hspace':0.1})
     im = comap.ScalarMappable(norm=Normalize(vmin,vmax),cmap=cm.acton)
     for kk, ax in enumerate(axes.flatten()):
-        var = z[indices[kk],:].reshape(45,81)
+        var = z[indices[kk],:].reshape(lat.shape[0],lon.shape[0])
         ax.set_extent(([219,261,43.25,65.25]))
         ax.set_title('Node '+str(indices[kk]))      
         
@@ -197,7 +197,9 @@ def plot_som(Nx, Ny, z, indices):
     else:
         cbar.set_label('z500 (m)')
     plt.suptitle('z500 clusters')
+    plt.savefig('plots/current-som.png')
     plt.show()
+
 
     return None
 
@@ -213,7 +215,7 @@ def wind_distributions(bmus):
     for i, ax in enumerate(axes.flatten()):
         distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
         ax.hist(distribution, range=(vmin,vmax),bins='auto',color='black')
-        ax.set_title('Mean ='+str(round(np.mean(distribution),2))+'m/s, Median ='+str(round(np.median(distribution),2))+'m/s')
+        ax.set_title('Me='+str(round(np.mean(distribution),1))+',Med='+str(round(np.median(distribution),1))+'(m/s)')
         ind = int((np.mean(distribution)-3)*(255)/(10-3))
         col_ar = cm.acton.colors[ind]
         col_tuple = tuple(col_ar)
@@ -222,6 +224,7 @@ def wind_distributions(bmus):
         distributions.append(distribution)
 
     #plt.tight_layout()
+    plt.savefig('plots/current-som-dist.png')
     plt.show()
 
     with open('distributions-'+title,'wb') as f:
@@ -236,17 +239,19 @@ if __name__ ==  "__main__":
 
     # setup
     res = 24  # time resolution in hours
-    Nx = 7
-    Ny = 5
+    Nx = 8
+    Ny = 2
     N_nodes = Nx * Ny
-    title = '24h-7x5-anomalies-all.pkl'
+    title = '24h-8x2-anomalies-all.pkl'
     period=slice("2009-10-01","2020-10-01")
-    lat = np.arange(44,66.5,0.5)[::-1]
-    lon = np.arange(220,260.5,0.5)
+    lat_offset = 9
+    lon_offset = 18
+    lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
+    lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
     train = False
     anomaly = True  # get rid of seasonal anomaly using 30-day rolling avg
-    use_wind = True  # concat obs into training data to guide map
-    number = 600 # weiht of wind
+    use_wind = False  # concat obs into training data to guide map
+    number = 0 # weiht of wind
 
     # data
     print('Prepping data...')
@@ -254,7 +259,7 @@ if __name__ ==  "__main__":
     obs = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc').sel(index=period)
     obs = low_pass_filter(obs,'obs',res)
 
-    era = xr.open_dataset('era-2009-2022-500.nc').sel(time=period)
+    era = xr.open_dataset('era-2009-2022-500.nc').sel(latitude=lat,longitude=lon-360,time=period)
     era = low_pass_filter(era,'era',res)
 
     if anomaly:
@@ -302,7 +307,9 @@ if __name__ ==  "__main__":
     QE = som.QE()  # quantization error
     TE = som.TE()  # topographic error
 
-    plot_som(Nx, Ny, som.z_raw[:,:-number], indices)
+    if use_wind:
+        som.z_raw = som.z_raw[:,:-number]
+    plot_som(Nx, Ny, som.z_raw, indices)
 
     # some stats on how good the clustering is
 
@@ -334,6 +341,7 @@ if __name__ ==  "__main__":
     ks_sig_frac = sig_count / N_nodes  # perentage of nodes that have significantly different distribution
     n = obs.shape[0]
     PF = (np.sum(BSS_nodes)/(N_nodes-1)) / (WSS/(n-N_nodes))  # pseudo-F statistic
+    print(' EV:',EV,' PF:',PF,' K-S fraction siginifcant:',ks_sig_frac,' TE:',TE)
     #plt.plot(range(era.shape[0]), bmus, 'bo--')
     #plt.show()
     

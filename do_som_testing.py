@@ -229,14 +229,12 @@ def wind_distributions(bmus):
 
 if __name__ ==  "__main__":
     # setup
-    sizes = [(5,3),(5,4),(5,5),(6,2),(6,3),(6,4),(6,5),(6,6),(7,3),(7,4),(7,5),(7,6),(7,7),(8,3),(8,4),(8,5),(8,6),(8,7),(8,8),(9,3),(9,4),(9,5),(9,6),(9,7),(9,8),(9,9)]  # map size
-    lat_dif = [9,11]  # domain size (degrees on each side of the center)
-    lon_dif = [18,20]
+    sizes = [(5,3),(6,2),(6,3),(6,6),(7,2),(7,3),(7,4),(7,7),(8,2),(8,3),(8,4),(8,6),(8,7),(8,8),(9,2),(9,3),(9,4),(9,5),(9,6),(9,7),(9,8),(9,9),(10,2),(10,3),(10,4),(10,5),(10,6)]  # map size
+    lat_dif = [8.5,9,11]  # domain size (degrees on each side of the center)
+    lon_dif = [16,18,20]
     res = 24  # time resolution in hours
     k_m = False
 
-    EV_max = 0
-    PF_max = 0
     EV_list = []
     PF_list = []
     TE_list = []
@@ -245,12 +243,12 @@ if __name__ ==  "__main__":
     period=slice("2009-10-01","2020-10-01")
     obs_full = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc').sel(index=period)
     obs_full = low_pass_filter(obs_full,'obs',res)
-    era_full = xr.open_dataset('era-2009-2022-500.nc').sel(time=period)
+    era_full = xr.open_dataset('era-2009-2022.nc').sel(time=period,level=500)
 
     title = '24h-anomalies-som'
 
     with open('stats-'+title+'.txt', 'w') as file:
-        file.write('Nx,Ny,lat,lon,TE,EV,PF,KS frac')
+        file.write('Nx,Ny,lat,lon,TE,QE,EV,PF,KS frac')
 
     for dom in range(len(lat_dif)):
         tic = time.perf_counter()
@@ -345,14 +343,11 @@ if __name__ ==  "__main__":
             n = obs.shape[0]
             PF = (np.sum(BSS_nodes)/(N_nodes-1)) / (WSS/(n-N_nodes))  # pseudo-F statistic
 
-            if EV > EV_max and PF > PF_max:
-                print('New maximums found. Num nodes ',N_nodes, ', and lat offset', lat_offset)
-                EV_max = EV
-                PF_max = PF
-
+            if ks_sig_frac > 0.60:
+                print('Map that has >0.6 k-s significance ',Nx,'x',Ny, ', and lat offset', lat_offset)
 
             with open('stats-'+title+'.txt','a') as file:
-                file.write('\n'+str(Nx)+','+str(Ny)+','+str(lat_offset)+','+str(lon_offset)+','+str(TE)+','+str(EV)+','+str(PF)+','+str(ks_sig_frac))
+                file.write('\n'+str(Nx)+','+str(Ny)+','+str(lat_offset)+','+str(lon_offset)+','+str(TE)+','+str(QE)+','+str(EV)+','+str(PF)+','+str(ks_sig_frac))
             EV_list.append(EV)
             PF_list.append(PF)
             TE_list.append(TE)
