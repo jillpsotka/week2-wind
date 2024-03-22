@@ -58,30 +58,6 @@ def pca_gefs(era):
     return None
 
 
-def visualize_normalization(gefs_arr):
-    gefs_mean = np.mean(era)  # this is the mean of each time step
-    gefs_std = np.std(era)
-    gefs_arr1 = (gefs_arr - gefs_mean) / gefs_std  # normalizing each time frame
-    gefs_arr2 = (gefs_arr1 * gefs_std) + gefs_mean  # reconstructed
-    # normalization from 510 did the whole array not just one axis - anomaly vibes
-    fig, axes = plt.subplots(nrows=1, ncols=3,sharex=True,sharey='row',figsize=(6,4))
-
-    for kk, ax in enumerate(axes.flatten()):
-        if kk == 0:
-            var = gefs_arr[kk,:].reshape(45,81)
-        elif kk == 1:
-            var = gefs_arr2[0,:].reshape(45,81)
-        else:
-            var = gefs_arr1[0,:].reshape(45,81)
-    
-        cs = ax.contourf(lon, lat, var,cmap=cm.acton)
-        ax.scatter(360-120.4306,55.6986,c='k',s=6,marker='*')
-        fig.colorbar(cs)
-
-    plt.suptitle('z500 clusters')
-    plt.show()
-
-
 
 def train_som(gefs_arr, obs_arr):
 
@@ -116,43 +92,6 @@ def monitor_training(som):
     print(np.min(np.array(diff)))
     
     return None
-
-
-def test_shapes(gefs_arr):
-    testing_x = np.arange(3,12)
-    testing_y = np.arange(2,7)
-    x_labels=[]
-
-    learning_rate = 1e-3
-    N_epochs = 50
-    colours_list = 'pink_blue_red_purple'
-
-    QE = []
-    TE = []
-    for ii in range(testing_x.shape[0]):
-        Nx = testing_x[ii]
-        for jj in range(testing_y.shape[0]):
-            x_labels.append(str(testing_x[ii])+'-'+str(testing_y[jj]))
-            Ny = testing_y[jj]
-            som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth = 4, colours_list = colours_list)
-            som.initialize_map(node_shape = 'hex')
-            som.train_map(learning_rate)
-            z = som.z #this is the pattern of each BMU
-            QE.append(som.QE()) #quantization error of map
-            TE.append(som.TE()) #topographic error of map
-        print(ii,'out of ',testing_x.shape[0])
-    
-    fig, ax1 = plt.subplots()
-    ax2 = ax1.twinx()
-    plt.title('QE and TE')
-    ax1.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),QE,label='QE')
-    ax2.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),TE,label='TE',c='orange')
-    ax1.set_xticks(np.arange(testing_x.shape[0]*testing_y.shape[0]))
-    ax1.set_xticklabels(x_labels)
-    ax1.legend(loc=0)
-    ax2.legend()
-    plt.show()
-    #plt.savefig('QEVTE.png')
 
 
 
@@ -226,12 +165,17 @@ def wind_distributions(bmus):
 
 
 
-
 if __name__ ==  "__main__":
     # setup
-    sizes = [(5,3),(6,2),(6,3),(6,6),(7,2),(7,3),(7,4),(7,7),(8,2),(8,3),(8,4),(8,6),(8,7),(8,8),(9,2),(9,3),(9,4),(9,5),(9,6),(9,7),(9,8),(9,9),(10,2),(10,3),(10,4),(10,5),(10,6)]  # map size
-    lat_dif = [8.5,9,11]  # domain size (degrees on each side of the center)
-    lon_dif = [16,18,20]
+    x_to_try = np.arange(2,21)
+    sizes = []
+    for x in x_to_try:
+        for y in range(1,x+1):
+            if x*y < 50:
+                sizes.append((x,y))
+
+    lat_dif = [4.5,7,9,11]  # domain size (degrees on each side of the center)
+    lon_dif = [8,12,16,20]
     res = 24  # time resolution in hours
     k_m = False
 
@@ -243,12 +187,12 @@ if __name__ ==  "__main__":
     period=slice("2009-10-01","2020-10-01")
     obs_full = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc').sel(index=period)
     obs_full = low_pass_filter(obs_full,'obs',res)
-    era_full = xr.open_dataset('era-2009-2022.nc').sel(time=period,level=500)
+    era_full = xr.open_dataset('era-2009-2022.nc').sel(time=period,level=700)
 
-    title = '24h-anomalies-som'
+    title = '24h-anomalies-som-700'
 
     with open('stats-'+title+'.txt', 'w') as file:
-        file.write('Nx,Ny,lat,lon,TE,QE,EV,PF,KS frac')
+        file.write('Nx,Ny,lat,lon,TE,QE,EV,PF,KS frac,R^2,range,std')
 
     for dom in range(len(lat_dif)):
         tic = time.perf_counter()
@@ -286,7 +230,7 @@ if __name__ ==  "__main__":
         for (Nx, Ny) in sizes:
             N_nodes = Nx * Ny
 
-            if k_m:
+            if k_m:  # k means clustering - not done
                 kmeans = KMeans(n_clusters=2, random_state=0).fit(era)
 
                 #you can see the labels with:
@@ -323,6 +267,15 @@ if __name__ ==  "__main__":
                 WSS_nodes[i] = np.sum(np.square(distributions[i] - mean))
                 dist_means[i] = mean
 
+            # correlation between distribution means and obs through time
+            means = [dist_means[bmu] for bmu in bmus] # time series of the 'predicted' means
+            slope, intercept, r_value, p_value, std_err = stats.linregress(means, obs)
+            r2 = r_value**2
+
+            # spread of distributions
+            dist_spread = np.max(dist_means) - np.min(dist_means)
+            dist_std = np.std(dist_means)
+
             WSS = np.sum(WSS_nodes)
             TSS = np.sum(np.square(obs - np.mean(dist_means)))
             EV = 1 - WSS/TSS  # explained variance
@@ -344,10 +297,11 @@ if __name__ ==  "__main__":
             PF = (np.sum(BSS_nodes)/(N_nodes-1)) / (WSS/(n-N_nodes))  # pseudo-F statistic
 
             if ks_sig_frac > 0.60:
-                print('Map that has >0.6 k-s significance ',Nx,'x',Ny, ', and lat offset', lat_offset)
+                print('Map that has k-s significance',round(ks_sig_frac,2),Nx,'x',Ny, ', and lat offset', lat_offset)
 
             with open('stats-'+title+'.txt','a') as file:
-                file.write('\n'+str(Nx)+','+str(Ny)+','+str(lat_offset)+','+str(lon_offset)+','+str(TE)+','+str(QE)+','+str(EV)+','+str(PF)+','+str(ks_sig_frac))
+                file.write('\n'+str(Nx)+','+str(Ny)+','+str(lat_offset)+','+str(lon_offset)+','+str(TE)+','+
+                           str(QE)+','+str(EV)+','+str(PF)+','+str(ks_sig_frac)+','+str(r2)+','+str(dist_spread)+','+str(dist_std))
             EV_list.append(EV)
             PF_list.append(PF)
             TE_list.append(TE)
@@ -356,7 +310,7 @@ if __name__ ==  "__main__":
         toc = time.perf_counter()
         print('Done that domain size',dom+1,f'/3 in {(toc - tic)/60:0.2f} minutes.')
     fig, ax = plt.subplots(1)
-    ax.plot(EV_list,label='EV')
+    #ax.plot(EV_list,label='EV')
     ax.plot(PF_list,label='PF')
     ax.plot(TE_list,label='TE')
     plt.legend()

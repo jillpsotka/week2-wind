@@ -124,9 +124,9 @@ if __name__ == "__main__":
 
     #gefs = xr.open_dataset('data/gh-reanalysis-2014-01.nc').sel(isobaricInhPa=500)
     #gefs = gefs_reanalysis(gefs, period=dates, res=6)
-    era = xr.open_dataset('era-2009-2020-temp.nc')
+    era7 = xr.open_dataset('era-2009-2021-700.nc')
     #low_pass_filter(obs,'obs',12)
-    era = era5_prep(era)
+    #era = era5_prep(era)
     #era = resample_mean(era)
     #era = era5(era, dates)
 

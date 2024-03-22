@@ -119,43 +119,6 @@ def monitor_training(som):
     return None
 
 
-def test_shapes(gefs_arr):
-    testing_x = np.arange(3,12)
-    testing_y = np.arange(2,7)
-    x_labels=[]
-
-    learning_rate = 1e-3
-    N_epochs = 200
-    colours_list = 'pink_blue_red_purple'
-
-    QE = []
-    TE = []
-    for ii in range(testing_x.shape[0]):
-        Nx = testing_x[ii]
-        for jj in range(testing_y.shape[0]):
-            x_labels.append(str(testing_x[ii])+'-'+str(testing_y[jj]))
-            Ny = testing_y[jj]
-            som = SOM(Nx, Ny, gefs_arr, N_epochs, linewidth = 4, colours_list = colours_list)
-            som.initialize_map(node_shape = 'hex')
-            som.train_map(learning_rate)
-            z = som.z #this is the pattern of each BMU
-            QE.append(som.QE()) #quantization error of map
-            TE.append(som.TE()) #topographic error of map
-        print(ii,'out of ',testing_x.shape[0])
-    
-    fig, ax1 = plt.subplots()
-    ax2 = ax1.twinx()
-    plt.title('QE and TE')
-    ax1.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),QE,label='QE')
-    ax2.plot(np.arange(testing_x.shape[0]*testing_y.shape[0]),TE,label='TE',c='orange')
-    ax1.set_xticks(np.arange(testing_x.shape[0]*testing_y.shape[0]))
-    ax1.set_xticklabels(x_labels)
-    ax1.legend(loc=0)
-    ax2.legend()
-    plt.show()
-    #plt.savefig('QEVTE.png')
-
-
 
 def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
