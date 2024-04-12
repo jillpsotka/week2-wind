@@ -55,6 +55,7 @@ class SOM:
         var = pca.explained_variance_
         std = var ** 0.5
         eigvecs = pca.components_
+        self.z_raw = []
 
         # evenly space out Nx points along first eigenvector, Ny points along second eigenvector
         mid = np.mean(self.obs, axis=0)
@@ -135,7 +136,7 @@ class SOM:
             self.z = self.z + learning_rate * self.neighbourhood(i2, sigma)[:, None] * (
                         ob - self.z)  # update nodes in data space
 
-    def train_map(self, learning_rate):
+    def train_map(self, learning_rate,adaptive_lr=True):
 
         """
         This function iteratively trains the map.
@@ -154,6 +155,8 @@ class SOM:
         z_epochs[:, :, 0] = self.z_init
 
         for epoch in range(self.N_epochs):  # for each epoch
+            if adaptive_lr and epoch == 40:
+                learning_rate = learning_rate*0.1
 
             # shuffle data -- present data to map in a different order
             obs_shuffle = np.copy(self.obs)
