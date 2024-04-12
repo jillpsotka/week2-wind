@@ -64,27 +64,32 @@ def low_pass_filter(ds,type_str,res):
         dUfilt[nan_indices] = np.nan  # get rid of nan again
         ds.Wind.values = dUfilt
         ds = ds.resample(index=res_str,origin=datetime(2007,12,1,origin)).mean()  # resample and take mean
+        # to remember: when xarray resamples, it names the interval by its starting point
 
     return ds
 
 
-def resample_mean(ds1, type_str,res=12):
+def resample_mean(ds, type_str,res=12):
     # resample 5-minute obs data
     # res is number of hours per resampling period
     #origin = int((res / 2) % 24)  # modulus makes it work when res is >24
-    if res == 6 or res == 8:
-        origin = 23  # 9am-3pm PST for 6-h, or 7am-3pm, 3pm-11pm, 11pm-7am PST for 8-h
+    if res == 6:
+        origin = 0  # 10am - 4pm PST for 6-h
     else:
-        origin = 2  # 6pm - 6am PST
+        origin = 3  # 7pm - 7am PST
 
     res_str = str(res) + 'H'
     if type_str == 'obs':  # separate this cuz obs are 5-minute and era is 1-hr
-        ds1 = ds1.to_dataframe()
-        ds = ds1.groupby(pd.Grouper(freq=res_str,origin=datetime(2007,12,1,origin))).agg(['mean','count']).swaplevel(0,1,axis=1)
-        ds = ds['mean'].where(ds['count']>=(12*res/2))  # only keep periods that have >1/2 of obs
-        ds = ds.to_xarray()
-    elif type_str == 'era' or type_str == 'gefs':
-        ds = ds1.resample(time=res_str,origin=datetime(2011,12,1,origin)).mean()
+        nan_indices=np.argwhere(np.isnan(ds.rolling(index=int(res*12)+1,min_periods=int(res*12/2),center=True).mean().Wind.values)).squeeze()  # this will tag any periods that are >1/2 nan
+        ds.Wind[nan_indices] = np.nan
+        ds = ds.resample(index=res_str,origin=datetime(2007,12,1,origin)).mean()
+    elif type_str == 'era':
+        ds = ds.resample(time=res_str,origin=datetime(2007,12,1,origin)).mean()
+    elif type_str == 'gefs':
+        ds['step'] = ds.step.values.astype('datetime64[ns]')
+        ds = ds.resample(step=res_str,origin=datetime(2007,12,1,origin)).mean()
+        ds['step'] = ds.step.values.astype('timedelta64[ns]')
+        ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird because i subtracted the lead time earlier
     else:
         print('type string must be one of obs/era/gefs. exiting')
         sys.exit()
@@ -109,7 +114,7 @@ def dates_obs_gefs(obs, gefs):
     times_new = times.where(indices, drop=True)  # valid times that have obs
 
     gefs = gefs.sel(time = times_new)  # get rid of gefs times that don't have obs
-    obs = obs.sel(index=times_new)  # get rid of obs that aren't in gefs
+    obs = obs.sel(index=times_new.values)  # get rid of obs that aren't in gefs
 
 
     return obs, gefs

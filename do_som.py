@@ -20,10 +20,10 @@ from scipy import signal
 import scipy.stats as stats
 
 
-mpl.rcParams['axes.labelsize'] = 10
+mpl.rcParams['axes.labelsize'] = 14
 mpl.rcParams['axes.titlesize'] = 12
-mpl.rcParams['ytick.labelsize'] = 8
-mpl.rcParams['xtick.labelsize'] = 8
+mpl.rcParams['ytick.labelsize'] = 12
+mpl.rcParams['xtick.labelsize'] = 12
 
 
 def prep_data(ds, obs):
@@ -98,7 +98,7 @@ def train_som(gefs_arr, obs_arr):
     som.train_map(learning_rate)
     toc = time.perf_counter()
     print(f'Finished training map in {(toc - tic)/60:0.2f} minutes. Saving...')
-    som.z_raw = som.z*gefs_std + gefs_mean
+    som.z_raw = som.z*era_std + era_mean
 
     with open('trained-map-'+title, 'wb') as handle:
         pickle.dump(som, handle)
@@ -124,8 +124,8 @@ def plot_som(Nx, Ny, z, indices):
     proj=ccrs.PlateCarree()
     vmin = np.min(z)
     vmax = np.max(z)  # colorbar range
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*2,Ny*2),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.02, 'hspace':0.1})
-    im = comap.ScalarMappable(norm=Normalize(vmin,vmax),cmap=cm.acton)
+    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*2,Ny*2),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.005, 'hspace':0.05})
+    im = comap.ScalarMappable(norm=Normalize(vmin,vmax),cmap=cm.lipari)
     for kk, ax in enumerate(axes.flatten()):
         var = z[indices[kk],:].reshape(lat.shape[0],lon.shape[0])
         ax.set_extent(([219,261,43.25,65.25]))
@@ -138,7 +138,7 @@ def plot_som(Nx, Ny, z, indices):
         ax.add_feature(cfeature.NaturalEarthFeature('physical', 'ocean', \
             scale='50m', edgecolor='k', facecolor='none', alpha=0.4,linewidth=0.6))
         
-        cs = ax.contourf(lon, lat, var, vmin=vmin,vmax=vmax, transform=ccrs.PlateCarree(),cmap=cm.acton)
+        cs = ax.contourf(lon, lat, var, vmin=vmin,vmax=vmax, transform=ccrs.PlateCarree(),cmap=cm.lipari)
         ax.scatter(360-120.4306,55.6986,c='k',transform=ccrs.PlateCarree(),s=6,marker='*')
 
         # Create gridlines
@@ -154,14 +154,14 @@ def plot_som(Nx, Ny, z, indices):
             gl.left_labels = True
 
     #cbar_ax = fig.add_axes([0.05, 0.07, 0.45*Nx, 0.03])
-    cbar = fig.colorbar(im,ax=axes,fraction=0.046, pad=0.04,orientation='horizontal')
+    cbar = fig.colorbar(im,ax=axes,fraction=0.06, pad=0.04,orientation='horizontal')
     if anomaly:
-        cbar.set_label('z500 anomaly (m)')
+        cbar.set_label('50kPa anomaly (m)')
     else:
-        cbar.set_label('z500 (m)')
-    plt.suptitle('z500 clusters')
-    plt.savefig('plots/current-som.png')
-    plt.show()
+        cbar.set_label('50 kPa (m)')
+    plt.suptitle('50 kPa clusters')
+    plt.savefig('plots/current-som.png',dpi=200)
+    #plt.show()
 
 
     return None
@@ -178,17 +178,17 @@ def wind_distributions(bmus):
     for i, ax in enumerate(axes.flatten()):
         distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
         ax.hist(distribution, range=(vmin,vmax),bins='auto',color='black')
-        ax.set_title('Me='+str(round(np.mean(distribution),1))+',Med='+str(round(np.median(distribution),1))+'(m/s)')
+        ax.set_title('Me='+str(round(np.mean(distribution),1))+'(m/s)')
         ind = int((np.mean(distribution)-3)*(255)/(10-3))
-        col_ar = cm.acton.colors[ind]
+        col_ar = cm.lipari.colors[ind]
         col_tuple = tuple(col_ar)
         ax.patch.set_facecolor(col_tuple)
         ax.patch.set_alpha(0.9)
         distributions.append(distribution)
 
     #plt.tight_layout()
-    plt.savefig('plots/current-som-dist.png')
-    plt.show()
+    plt.savefig('plots/current-som-dist.png',dpi=200)
+    #plt.show()
 
     with open('distributions-'+title,'wb') as f:
         pickle.dump(distributions,f)
@@ -202,13 +202,13 @@ if __name__ ==  "__main__":
 
     # setup
     res = 24  # time resolution in hours
-    Nx = 8
+    Nx = 6
     Ny = 2
     N_nodes = Nx * Ny
-    title = '24h-8x2-anomalies-all.pkl'
-    period=slice("2009-10-01","2020-10-01")
-    lat_offset = 9
-    lon_offset = 18
+    title = '24h-6x2-anomalies-500.pkl'
+    period=slice("2009-10-01","2020-09-30")
+    lat_offset = 11
+    lon_offset = 20
     lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
     lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
     train = False
@@ -220,10 +220,10 @@ if __name__ ==  "__main__":
     print('Prepping data...')
 
     obs = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc').sel(index=period)
-    obs = low_pass_filter(obs,'obs',res)
+    obs = resample_mean(obs,'obs',res)
 
-    era = xr.open_dataset('era-2009-2022-500.nc').sel(latitude=lat,longitude=lon-360,time=period)
-    era = low_pass_filter(era,'era',res)
+    era = xr.open_dataset('era-2009-2022.nc').sel(latitude=lat,longitude=lon-360,time=period,level=700)
+    era = resample_mean(era,'era',res)
 
     if anomaly:
         clim = era.groupby("time.dayofyear").mean(dim=["time"])
@@ -239,12 +239,9 @@ if __name__ ==  "__main__":
     obs, era = prep_data(era, obs)
 
     # normalize data (this is actually the z score)
-    gefs_mean = np.mean(era) 
-    gefs_std = np.std(era)
-    era = (era - gefs_mean) / gefs_std  # normalizing each time frame
-    obs_mean = np.mean(obs) 
-    obs_std = np.std(obs)
-    obs = (obs - obs_mean) / obs_std  # normalizing each time frame
+    era_mean = np.mean(era) 
+    era_std = np.std(era)
+    era = (era - era_mean) / era_std  # normalizing each time frame
 
     if use_wind:  # add wind obs to training to try to optimize
         obs_repeat = np.repeat(obs[:,np.newaxis],number,axis=1)  # (time, repeats)
@@ -264,7 +261,6 @@ if __name__ ==  "__main__":
     
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
     bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
-    obs = (obs*obs_std) + obs_mean
     distributions = wind_distributions(bmus)
     freq = BMU_frequency(som)  # frequency of each node
     QE = som.QE()  # quantization error
