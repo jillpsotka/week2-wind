@@ -105,7 +105,7 @@ def map_based_table(ds):
 def shape_stats(ds):
     ds = ds[ds['lat'] > 10]
     cmap = plt.cm.hot_r
-    colors = cmap(np.linspace(0.06, 1, 10))
+    colors = cmap(np.linspace(0.08, 1, 10))
     cmap = mpl.colors.LinearSegmentedColormap.from_list("mycmap", colors)   
 
     sc = plt.scatter(ds['Nx'],ds['Ny'],c=ds['bss-90-gefs'],cmap=cmap)
@@ -119,25 +119,78 @@ def shape_stats(ds):
     plt.savefig('plots/bss90-gefs.png',dpi=200)
 
 
-def heat_map(ds):
+def domain_stats(ds):
+    small = ds[ds['lat'] < 8]
+    med = ds[ds['lat'] == 9]
+    large = ds[ds['lat'] > 10]
+
+    domains = [small,med,large]
+    tits = ['small','med','large']
+    stats = ['R','crpss_avg','D','rmse']
+
+    fig, axes = plt.subplots(nrows=2, ncols=2)
+    for i, ax in enumerate(axes.flatten()):
+        for k in range(len(domains)):
+            ax.scatter(domains[k]['N_nodes'],domains[k][stats[i]],label=tits[k])
+        ax.set_ylabel(stats[i])
+    plt.legend()
+
+    plt.show()
+    
+
+def domain_pf(ds_f):
+    fig, axes = plt.subplots(nrows=2, ncols=2)
+
+    for i, ax in enumerate(axes.flatten()):  # each season
+        ds = ds_f[i]
+        #ds = ds[ds['Ny']>1]
+        small = ds[ds['lat'] < 8]
+        med = ds[ds['lat'] == 9]
+        large = ds[ds['lat'] > 10]
+
+        domains = [small,med,large]
+        tits = ['small','med','large']
+
+    
+        for k in range(len(domains)):  # 3 colour scatter on each subplot
+            ax.scatter(domains[k]['N_nodes'],domains[k]['PF'],label=tits[k])
+        ax.set_ylabel('PF')
+        ax.set_title(titles[i])
+    plt.legend()
+
+    plt.show()
+        
+
+
+
+def heat_map(ds,var,tit):
     # how good at sorting into nodes -> topographic error
     # how different are the wind dists -> k-s significance
     # how well does it predict -> crpss
 
+    # create some strings for labels
+    labels = []
+    for l in ds.index:
+        labels.append(str(ds['Nx'][l])+'x'+str(ds['Ny'][l]))
+    ds['labels'] = labels
+
 
     cmap = plt.cm.hot_r
-    #colors = cmap(np.linspace(0, 0.8, 10))
-    #cmap = mpl.colors.LinearSegmentedColormap.from_list("mycmap", colors)   
+    colors = cmap(np.linspace(0.08, 1, 10))
+    cmap = mpl.colors.LinearSegmentedColormap.from_list("mycmap", colors)   
 
-    sc = plt.scatter(ds['TE'],ds['PF'],c=ds['crpss_avg'],cmap=cmap)
+    sc = plt.scatter(ds['N_nodes'],ds['PF'],c=ds[var],cmap=cmap)
+    for i, txt in enumerate(ds['labels']):
+        plt.annotate(txt, (ds['N_nodes'][i], ds['PF'][i]),fontsize=6)
     cbar = plt.colorbar(sc)
-    cbar.set_label('Avg CRPSS')
-    plt.xlabel('Topographic error')
-    plt.gca().invert_xaxis()
+    cbar.set_label(var)
+    plt.xlabel('N nodes')
+    #plt.gca().invert_xaxis()
     plt.ylabel('Pseudo-F')
-    plt.title('Stats for 50kPa, 24-h, reanalysis')
+    plt.title(tit+', 50kPa, 24-h, reanalysis')
     plt.tight_layout()
-    plt.savefig('plots/heat-map.png',dpi=200)
+    plt.savefig('plots/heat-map-'+var+'-'+tit+'.png',dpi=200)
+    plt.close()
 
 
     return None
@@ -146,26 +199,76 @@ def heat_map(ds):
 
 
 if __name__ ==  "__main__":
-    filename = 'stats-24h-anomalies-som-500-gefs.txt'
+    summer = 'stats-24h-anomalies-som-500-summer.txt'
+    fall ='stats-24h-anomalies-som-500-fall.txt'
+    winter = 'stats-24h-anomalies-som-500-winter.txt'
+    spring = 'stats-24h-anomalies-som-500-spring.txt'
+
+    spring_no_anom = 'stats-24h-som-500-spring.txt'
+    winter_no_anom = 'stats-24h-som-500-winter.txt'
+
+    titles = ['winter-anom','winter','spring-anom','spring']
+    files = [winter,winter_no_anom,spring,spring_no_anom]
+
+    indv_ds = []
 
     # do some stuff so that csv reader keeps the lists
     # https://stackoverflow.com/questions/67382217/how-to-read-a-csv-dialect-containing-a-list-in-square-brackets
-    converted = StringIO()
-    with open(filename) as file:
-        converted.write(file.read().replace('[', ']'))
-    converted.seek(0)
-    stats = pd.read_csv(converted,sep=',',header=0,skipinitialspace=True,quotechar=']')
+    for f in range(len(files)):
+        filename = files[f]
+        title = titles[f]
+        converted = StringIO()
+        with open(filename) as file:
+            converted.write(file.read().replace('[', ']'))
+        converted.seek(0)
+        stats = pd.read_csv(converted,sep=',',header=0,skipinitialspace=True,quotechar=']')
 
-    stats = sort_by_N(stats)
+        stats = sort_by_N(stats)
 
-    crpss_avg = []
-    for l in stats.index:
-        stats['crpss-nodes'][l] = stats['crpss-nodes'][l].replace('nan', 'np.nan')
-        crpss = np.array(eval(stats['crpss-nodes'][l]))
-        crpss[crpss<0] = 0
-        crpss_avg.append(np.nanmean(crpss))
-    stats['crpss_avg'] = crpss_avg
+        crpss_avg = []
+        crpss_avg_gefs=[]
+        for l in stats.index:
+            stats['crpss-nodes'][l] = stats['crpss-nodes'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['crpss-nodes'][l]))
+            stats['crpss-nodes'][l] = crpss
+            crpss[crpss<0] = 0
+            crpss_avg.append(np.nanmean(crpss))
 
-    shape_stats(stats)
+            stats['crpss-nodes-gefs'][l] = stats['crpss-nodes-gefs'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['crpss-nodes-gefs'][l]))
+            stats['crpss-nodes-gefs'][l] = crpss
+            crpss[crpss<0] = 0
+            crpss_avg_gefs.append(np.nanmean(crpss))
+
+            stats['rmse-nodes-gefs'][l] = stats['rmse-nodes-gefs'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['rmse-nodes-gefs'][l]))
+            stats['rmse-nodes-gefs'][l] = crpss
+            stats['rmse-nodes'][l] = stats['rmse-nodes'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['rmse-nodes'][l]))
+            stats['rmse-nodes'][l] = crpss
+
+            stats['bias-nodes-gefs'][l] = stats['bias-nodes-gefs'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['bias-nodes-gefs'][l]))
+            stats['bias-nodes-gefs'][l] = crpss
+            stats['bias-nodes'][l] = stats['bias-nodes'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['bias-nodes'][l]))
+            stats['bias-nodes'][l] = crpss
+
+            stats['mae-nodes-gefs'][l] = stats['mae-nodes-gefs'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['mae-nodes-gefs'][l]))
+            stats['mae-nodes-gefs'][l] = crpss
+            stats['mae-nodes'][l] = stats['mae-nodes'][l].replace('nan', 'np.nan')
+            crpss = np.array(eval(stats['mae-nodes'][l]))
+            stats['mae-nodes'][l] = crpss
+
+        stats['crpss_avg'] = crpss_avg
+        stats['crpss_avg-gefs'] = crpss_avg_gefs
+
+        indv_ds.append(stats)
+
+        #heat_map(stats,'R',title)
+        domain_stats(stats)
+
+    domain_pf(indv_ds)
 
     print('done')

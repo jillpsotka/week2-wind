@@ -29,15 +29,15 @@ mpl.rcParams['xtick.labelsize'] = 12
 def prep_data(ds, obs):
 
     ds_arr = ds.gh.to_numpy()
-    obs_arr = obs.Wind.to_numpy()
+    #obs_arr = obs.Wind.to_numpy()
     ds_arr = np.reshape(ds_arr,(ds.time.shape[0],ds.latitude.shape[0]*ds.longitude.shape[0])) #(time,space)
 
-    if ds_arr.shape[0] != obs_arr.shape[0]:
+    if ds_arr.shape[0] != len(obs.index):
         print('GEFS and obs not the same shape! Exiting...')
         os.exit()
 
 
-    return obs_arr, ds_arr
+    return ds_arr
 
 
 
@@ -196,6 +196,44 @@ def wind_distributions(bmus):
     return distributions
 
 
+def distributions_seasonal(bmus):
+    distributions = []
+    winter=obs.sel(index=obs.index.dt.season=='DJF')
+    spring=obs.sel(index=obs.index.dt.season=='MAM')
+    summer=obs.sel(index=obs.index.dt.season=='JJA')
+    fall=obs.sel(index=obs.index.dt.season=='SON')
+
+    vmin = np.min(obs.Wind.values)
+    vmax = np.max(obs.Wind.values)
+
+    seasons = [winter,spring,summer,fall]
+    seasons_str = ['winter','spring','summer','fall']
+
+    for seas in range(len(seasons)):
+    
+        fig, axes = plt.subplots(nrows=Ny, ncols=Nx, figsize=(Nx*2,Ny*2),gridspec_kw = {'wspace':0.5, 'hspace':0.5})
+
+        for i, ax in enumerate(axes.flatten()):
+            distribution = seasons[seas].isel(index=np.where(seasons[seas].BMU.values==i)[0]).Wind  # wind obs that belong to this node -> this is our distribution
+            ax.hist(distribution, range=(vmin,vmax),bins='auto',color='black')
+            ax.set_title('Me='+str(round(np.mean(distribution.values),1))+'(m/s)')
+            ind = int((np.mean(distribution)-3)*(255)/(10-3))
+            col_ar = cm.lipari.colors[ind]
+            col_tuple = tuple(col_ar)
+            ax.patch.set_facecolor(col_tuple)
+            ax.patch.set_alpha(0.9)
+            distributions.append(distribution)
+
+        #plt.tight_layout()
+        #plt.show()
+        plt.savefig('plots/dist'+seasons_str[seas]+'.png',dpi=200)
+            
+
+        # with open('distributions-'+title,'wb') as f:
+        #     pickle.dump(distributions,f)
+
+    return distributions
+
 
 
 if __name__ ==  "__main__":
@@ -236,7 +274,7 @@ if __name__ ==  "__main__":
         era = era.groupby("time.dayofyear") - clim
 
     obs, era = dates_obs_gefs(obs, era)
-    obs, era = prep_data(era, obs)
+    era = prep_data(era, obs)
 
     # normalize data (this is actually the z score)
     era_mean = np.mean(era) 
@@ -244,7 +282,7 @@ if __name__ ==  "__main__":
     era = (era - era_mean) / era_std  # normalizing each time frame
 
     if use_wind:  # add wind obs to training to try to optimize
-        obs_repeat = np.repeat(obs[:,np.newaxis],number,axis=1)  # (time, repeats)
+        obs_repeat = np.repeat(obs.Wind.values[:,np.newaxis],number,axis=1)  # (time, repeats)
         era = np.concatenate([era,obs_repeat],axis=1) # adding repeated obs onto end of lat/lon data
 
 
@@ -252,7 +290,7 @@ if __name__ ==  "__main__":
         #test_shapes(era)
 
         print('Training map...')
-        som = train_som(era, obs)
+        som = train_som(era, obs.Wind.values)
     else:
         with open('trained-map-'+title,'rb') as handle:
             som = pickle.load(handle)
@@ -261,6 +299,8 @@ if __name__ ==  "__main__":
     
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
     bmus = BMUs(som)  # the nodes that each forecast belongs to -> use this to look at wind
+    obs['BMU']=('index',bmus)
+    distributions_seasonal(bmus)
     distributions = wind_distributions(bmus)
     freq = BMU_frequency(som)  # frequency of each node
     QE = som.QE()  # quantization error

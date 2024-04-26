@@ -20,6 +20,7 @@ from scipy import signal
 from sklearn.metrics import brier_score_loss
 import scipy.stats as stats
 from datetime import datetime
+import glob
 
 
 
@@ -43,6 +44,30 @@ def prep_data(ds, obs):
     return obs_arr, ds_arr
 
 
+def stack_uneven(arrays, fill_value=np.nan):
+    # https://stackoverflow.com/questions/58070609/how-to-save-many-np-arrays-of-different-size-in-one-file-eg-one-np-array 
+    '''
+    Fits arrays into a single numpy array, even if they are
+    different sizes. `fill_value` is the default value.
+
+    Args:
+            arrays: list of np arrays of various sizes
+                (must be same rank, but not necessarily same size)
+            fill_value (float, optional):
+
+    Returns:
+            np.ndarray
+    '''
+    sizes = [a.shape for a in arrays]
+    max_sizes = np.max(list(zip(*sizes)), -1)
+    # The resultant array has stacked on the first dimension
+    result = np.full((len(arrays),) + tuple(max_sizes), fill_value)
+    for i, a in enumerate(arrays):
+      # The shape of this array `a`, turned into slices
+      slices = tuple(slice(0,s) for s in sizes[i])
+      # Overwrite a block slice of `result` with this array `a`
+      result[i][slices] = a
+    return result
 
 
 def pca_gefs(era):
@@ -188,36 +213,32 @@ if __name__ ==  "__main__":
     val_period = slice("2020-10-01","2022-03-31")
     val_period_gefs = slice("2020-09-24","2022-03-24")
 
-    print('assembling data...')
+    print('Loading data...')
     obs_full = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc')
-    obs_full = obs_full.sel(index=obs_full.index.dt.season=='JJA')
     obs_full = resample_mean(obs_full,'obs',res)
+    obs_full = obs_full.sel(index=obs_full.index.dt.season=='JJA')
     obs_train = obs_full.sel(index=train_period)
     obsv = obs_full.sel(index=val_period)
-    era_full = xr.open_dataset('era-2009-2022.nc').sel(level=500)
-    era_train = era_full.sel(time=train_period)
-    era_val = era_full.sel(time=val_period)
-    gefs_val_full = xr.open_dataset('data/gefs-z-2020-09-24-2023-12-31-0-500.nc').sel(time=val_period_gefs)
-    gefs_val_full = gefs_val_full.shift(time=7)  # now time is really valid time of 7-day forecast -> quick fix, not generalizable >:(
-    gefs_val_full['longitude'] = gefs_val_full['longitude'] - 360
+    obs_full = None
 
-    title = 'testing'
+    title = '24h-anomalies-som-500-members'
 
     with open('stats-'+title+'.txt', 'w') as file:
-        file.write('Nx,Ny,Nnodes,lat,lon,TE,QE,EV,PF,WSS,KS-frac,range,std,R,rmse,mae,bias,'+
-                   'D,bss-25,bss-50,bss-75,bss-90,bss-95,crpss-nodes,mae-nodes,rmse-nodes,bias-nodes,'+
+        file.write('Nx,Ny,Nnodes,lat,lon,TE,QE,EV,PF,WSS,KS-frac,range,std,'+
                    'R-gefs,rmse-gefs,mae-gefs,bias-gefs,D-gefs,bss-25-gefs,bss-50-gefs,bss-75-gefs'+
-                   ',bss-90-gefs,bss-95-gefs,crpss-nodes-gefs,mae-nodes-gefs,rmse-nodes-gefs,bias-nodes-gefs')
-    for dom in range(len(lat_dif)):
-        tic = time.perf_counter()
-
+                   ',bss-90-gefs,bss-95-gefs')
+        
+    for dom in range(len(lat_dif)):  # for each domain size
         lat_offset = lat_dif[dom]
         lon_offset = lon_dif[dom]
         lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
         lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
 
-        era = era_train.sel(latitude=lat,longitude=lon-360)
+        era = xr.open_dataset('era-2009-2022.nc',engine='scipy').sel(level=500,latitude=lat,longitude=lon-360,time=train_period)
+        tic = time.perf_counter()
+
         if anomaly:
+            print('Processing data...')
             # taking out all (spatial and temporal) anomaly
             clim = era.groupby("time.dayofyear").mean(dim=["time"])  # clim for each doy for each pixel
             clim_concat = xr.concat([clim.isel(dayofyear=slice(330,366)),clim,clim.isel(dayofyear=slice(0,36))],dim='dayofyear')
@@ -228,33 +249,19 @@ if __name__ ==  "__main__":
             clim.gh.values = dUfilt
 
             era = era.groupby("time.dayofyear") - clim
-            erav = era_val.sel(latitude=lat,longitude=lon-360).groupby("time.dayofyear") - clim
-            gefs_val = gefs_val_full.sel(latitude=lat,longitude=lon-360).groupby("time.dayofyear") - clim
-        else:
-            erav = era_val.sel(latitude=lat,longitude=lon-360)
-            gefs_val = gefs_val_full.sel(latitude=lat,longitude=lon-360)
+            #erav = erav.groupby("time.dayofyear") - clim
         era = resample_mean(era,'era',res)
-        erav = resample_mean(erav,'era',res)
-        gefs_val = resample_mean(gefs_val,'gefs',res).sel(step=t_step,method='nearest')
+        #erav = resample_mean(erav,'era',res)
 
         obs, era = dates_obs_gefs(obs_train, era)
         obs, era = prep_data(era, obs)
-
-        obsv, gefs_val = dates_obs_gefs(obsv, gefs_val)
-        a, erav = dates_obs_gefs(obsv, erav)
-        obsv = obsv.Wind.to_numpy()
-
-        if len(obsv) != len(gefs_val.time.values):
-            print('something wronggggg with time series length',len(obsv),len(gefs_val.time.values))
-
+        #a, erav = dates_obs_gefs(obsv, erav)
+        #obsv = obsv.Wind.to_numpy()
 
         # normalize data (this is actually the z score)
         era_mean = np.mean(era) 
         era_std = np.std(era)
         era = (era - era_mean) / era_std  # normalizing each time frame
-        # obs_mean = np.mean(obs) 
-        # obs_std = np.std(obs)
-        # obs = (obs - obs_mean) / obs_std  # normalizing each time frame
 
         for (Nx, Ny) in sizes:
             N_nodes = Nx * Ny
@@ -275,8 +282,6 @@ if __name__ ==  "__main__":
                 file.write('\n'+str(Nx)+','+str(Ny)+','+str(N_nodes)+','+str(lat_offset)+','+str(lon_offset))
 
             som = train_som(era)
-
-            #monitor_training(som)
 
             # map-based statistics
             
@@ -325,97 +330,149 @@ if __name__ ==  "__main__":
                 file.write(','+str(TE)+','+str(QE)+','+str(EV)+','+str(PF)+','+str(WSS)
                        +','+str(ks_sig_frac)+','+str(dist_spread)+','+str(dist_std))
 
-            # validation statistics
-                
+            # validation statistics for gefs
+            
+            predicted_bmus=[]
+            obsv=obsv.assign_coords(member=[4,5]).dropna(dim='index')
+            bmus_mems = np.empty((len(obsv.index),2))
+            bmus_mems.fill(np.nan)
+            mem = 0
 
-            for ds in [erav, gefs_val]:
-                #crps
-                crps_som = np.empty((N_nodes,len(obsv)))  # (nodes, forecasts)
-                crps_som.fill(np.nan)
-                crps_clim = np.empty((N_nodes,len(obsv)))
-                crps_clim.fill(np.nan)
+            for gefs_file in ['data/gefs-z-2020-09-26-2023-12-31-4.nc','data/gefs-z-2020-09-26-2023-12-31-5.nc']:
+                member = gefs_file[-4]
+                #glob.glob('data/gefs-z-*.nc'):  # for each member
+                # open all of them and calculate best bmus, to get memory out of the way
+                # save in a dataset so each validation date has a corresponding distribution
+                current_gefs = xr.open_dataset(gefs_file).sel(time=val_period_gefs,isobaricInhPa=500)
+                current_gefs = current_gefs.shift(time=7)  # now time is really valid time of 7-day forecast -> quick fix, not generalizable >:(
+                current_gefs['longitude'] = current_gefs['longitude'] - 360
+                current_gefs = resample_mean(current_gefs,'gefs',res).sel(step=t_step,method='nearest')
+                current_gefs = current_gefs.sel(time=obsv.index.values)  # only keep indices with valid obs
 
-                #mae
-                mae_som_mean = np.empty((N_nodes,len(obsv)))
-                mae_som_mean.fill(np.nan)
+                if anomaly:
+                    current_gefs = current_gefs.sel(latitude=lat,longitude=lon-360).groupby("time.dayofyear") - clim
+                else:
+                    current_gefs = current_gefs.sel(latitude=lat,longitude=lon-360)
 
-                #rmse
-                rmse_som_mean = np.empty((N_nodes,len(obsv)))
-                rmse_som_mean.fill(np.nan)
+                #current_gefs=current_gefs.transpose("time","latitude","longitude")  # put time first so that can enumerate thru time
 
-                #bias
-                bias_som_mean = np.empty((N_nodes,len(obsv)))
-                bias_som_mean.fill(np.nan)
+                for kk, gh in enumerate(current_gefs.gh):  # for each validation date
+                    if np.isnan(gh.any()):
+                        bmus_mems[kk,mem]=np.nan()
+                    else:
+                        mem_arr = np.reshape(gh.to_numpy(),(gh.latitude.shape[0]*gh.longitude.shape[0]))
+                        BMU = np.argmin(np.linalg.norm(mem_arr - som.z_raw, axis=1))
+                        bmus_mems[kk,mem]=BMU
+                mem += 1
+            
+            obsv['bmu'] = (('index','member'),bmus_mems)
+            obsv['bmu'] = obsv['bmu'].astype('int')
+            # need to make a time series of the distributions
+            smth = [[distributions[b] for b in date] for date in obsv.bmu.values]
+            for y in range(len(smth)):
+                smth[y] = np.concatenate(smth[y])  # now it is a list of arrays
+            dists_time = stack_uneven(smth)
+            
+            # remake some of the map stats based on the new distributions
+            # pseudo-F and K-S both tell us about the uniqueness of the distributions
+            dist_means = np.nanmean(dists_time,axis=1)
+            total_mean = np.nanmean(dist_means)
+            BSS_nodes = np.empty(len(obsv.index))
 
-                bmus_val = np.zeros(len(obsv), dtype='int')
+            WSS = np.nansum(np.square(dists_time - np.vstack(dist_means)))
+            TSS = np.sum(np.square(obs - np.nanmean(dist_means)))
 
-                for kk, gh in enumerate(ds.gh):  # for each validation date
-                    gh = np.reshape(gh.to_numpy(),(gh.latitude.shape[0]*gh.longitude.shape[0]))
-                    BMU = np.argmin(np.linalg.norm(gh - som.z_raw, axis=1))
-                    #second_bmu = np.argsort(np.linalg.norm(ob - som.z_raw, axis=1))[1]
-                    bmus_val[kk] = BMU
-                    ob = obsv[kk]
+            sig_count = 0
+            m = obs.shape[0]
+            for i in range(len(dist_means)):
+                BSS_nodes[i] = np.square(dist_means[i] - total_mean)
+                # K-S test
+                n = dists_time[i,:].shape[0]
+    
+                crit = 1.63*np.sqrt((n+m)/(n*m))  # 1.36 is for 95% confidence, 1.07 for 80 1.22 for 90 1.52 for 98 1.63 for 99
+                ks = stats.ks_2samp(dists_time[i,:], obs)  # rejection means the distirbutions are different
+                if ks.statistic > crit and ks.pvalue < 0.05:  # rejection of null
+                    sig_count +=1
 
-                    crps_som[BMU,kk] =ps.crps_ensemble(ob, distributions[BMU])
-                    crps_clim[BMU,kk] =ps.crps_ensemble(ob, obsv)
-                    mae_som_mean[BMU,kk] = np.abs(dist_means[BMU] - ob)
-                    rmse_som_mean[BMU,kk] = np.square(dist_means[BMU] - ob)
-                    bias_som_mean[BMU,kk] = dist_means[BMU] - ob
+            ks_sig_frac = sig_count / len(dist_means)  # perentage of nodes that have significantly different distribution
+            PF = (np.sum(BSS_nodes)/(len(dist_means)-1)) / (WSS/(m-len(dist_means)))  # pseudo-F statistic
 
-                # correlation between distribution means and obs through time
-                means_val = np.array([dist_means[b] for b in bmus_val]) # time series of the 'predicted' means
-                slope, intercept, r_value, p_value, std_err = stats.linregress(means_val, obsv)
-                rmse = np.sqrt(np.mean((means_val - obsv)**2))
-                mae = np.mean(np.abs(means_val-obsv))
-                bias = np.mean(means_val-obsv)
+            ####### PERFORMANCE STATS
+            #crps
+            crps_som = np.empty((len(dist_means)))  # (nodes, forecasts)
+            crps_som.fill(np.nan)
+            crps_clim = np.empty((len(dist_means)))
+            crps_clim.fill(np.nan)
 
-                # ranked continuous ensemble stuff
-                # ranking the ensembles (distributions) and seeing if those rankings follow obs
-                R_list = []
-                crpss_nodes = []
-                mae_nodes = []
-                rmse_nodes = []
-                bias_nodes = []
-                for j,d in enumerate(distributions):  # for each distribution
-                    crpss_nodes.append(np.nanmean(1-crps_som[j,:]/crps_clim[j,:])) 
-                    mae_nodes.append(np.nanmean(mae_som_mean[j,:]))
-                    rmse_nodes.append(np.sqrt(np.nanmean(rmse_som_mean[j,:])))
-                    bias_nodes.append(np.nanmean(bias_som_mean[j,:]))
+            #mae
+            mae_som_mean = np.empty((len(dist_means)))
+            mae_som_mean.fill(np.nan)
 
-                    u_list = []
-                    for i,t in enumerate(distributions):  # for each distribution again to compare lol
-                        if j == i:
-                            continue
-                        obs_sorted = np.sort(np.concatenate((d,t)))  # sorting every obs in the distributions
-                        F = (np.sum(np.isin(obs_sorted,d).nonzero()[0]) - len(d)*(len(d)+1)/2) / (len(d)*len(t))
-                        if F>0.5:
-                            u = 1
-                        elif F<0.5:
-                            u = 0
-                        else:
-                            u=0.5
-                        u_list.append(u)
-                    R = 1 + np.sum(u_list)
-                    R_list.append(R)
+            #rmse
+            rmse_som_mean = np.empty((len(dist_means)))
+            rmse_som_mean.fill(np.nan)
 
-                D = 0.5*(stats.kendalltau(obsv,[R_list[d] for d in bmus_val])[0] + 1)  # generalized discrimination score (Weigel&Mason 2011)
+            #bias
+            bias_som_mean = np.empty((len(dist_means)))
+            bias_som_mean.fill(np.nan)
+            for kk, gh in enumerate(dist_means):  # for each validation date
+                ob = obsv.isel(index=kk).Wind  # wind observation for this date
 
-                # windy vs not windy
-                splits = [25,50,75,90,95]
-                bss = []
-                for percentile in splits:
-                    split = np.percentile(obs, percentile)
-                    target = np.array(obsv > split)  # boolean array of obs
-                    dist_cdf = [np.sum(d>split)/len(d) for d in distributions]  # probabilities of being above threshold in each distribution
-                    prob = [dist_cdf[d] for d in bmus_val]  # probabilities for the time series
-                    prob_clim = np.sum([d>split for d in obs])/len(obs)
-                    brier = brier_score_loss(target, prob)
-                    brier_clim = brier_score_loss(target, np.repeat(prob_clim,len(target)))
-                    bss.append(1 - brier/brier_clim)
-                # write things to file
-                with open('stats-'+title+'.txt','a') as file:
-                    file.write(','+str(r_value)+','+str(rmse)+','+str(mae)+','+str(bias)+','+str(D)+','+str(bss[0])+','+str(bss[1])+','+str(bss[2])+
-                            ','+str(bss[3])+','+str(bss[4])+','+str(crpss_nodes)+','+str(mae_nodes)+','+str(rmse_nodes)+','+str(bias_nodes))
+                crps_som[kk] =ps.crps_ensemble(ob, dists_time[kk])
+                crps_clim[kk] =ps.crps_ensemble(ob, obs)
+                mae_som_mean[kk] = np.abs(gh - ob)
+                rmse_som_mean[kk] = np.square(gh - ob)
+                bias_som_mean[kk] = gh - ob
+
+            # correlation between distribution means and obs through time
+            slope, intercept, r_value, p_value, std_err = stats.linregress(dist_means, obsv.Wind)
+            rmse = np.sqrt(np.mean((dist_means - obsv.Wind)**2))
+            mae = np.mean(np.abs(dist_means-obsv.Wind))
+            bias = np.mean(dist_means-obsv.Wind)
+
+            # ranked continuous ensemble stuff
+            # ranking the ensembles (distributions) and seeing if those rankings follow obs
+            R_list = []
+
+            for j,d in enumerate(dists_time):  # for each distribution
+                a = d[~np.isnan(d)]
+                u_list = []
+                for i,t in enumerate(dists_time):  # for each distribution again to compare lol
+                    if j == i:
+                        continue
+                    b = t[~np.isnan(t)]
+                    obs_sorted = np.sort(np.concatenate((a,b)))  # sorting every obs in the distributions
+                    # basically calculating which distribution is bigger
+                    F = (np.sum(np.isin(obs_sorted,a).nonzero()[0]) - len(a)*(len(a)+1)/2) / (len(a)*len(b))
+                    if F>0.5:
+                        u = 1
+                    elif F<0.5:
+                        u = 0
+                    else:
+                        u=0.5
+                    u_list.append(u)
+                R = 1 + np.sum(u_list)
+                R_list.append(R)  # rank of this disitrbution
+
+            D = 0.5*(stats.kendalltau(obsv.Wind,R_list)[0] + 1)  # generalized discrimination score (Weigel&Mason 2011)
+            #TODO: signifiance scores! don't record result unless significant
+            # (esp important now that splitting into seasons, larger maps won't be stat sig.)
+
+            # windy vs not windy
+            splits = [25,50,75,90,95]
+            bss = []
+            for percentile in splits:
+                split = np.percentile(obs, percentile)
+                target = np.array(obsv.Wind > split)  # boolean array of obs
+                prob = [np.sum(d>split)/len(d) for d in dists_time]  # probabilities of being above threshold in each distribution
+                prob_clim = np.sum([d>split for d in obs])/len(obs)
+                brier = brier_score_loss(target, prob)
+                brier_clim = brier_score_loss(target, np.repeat(prob_clim,len(target)))
+                bss.append(1 - brier/brier_clim)
+            # write things to file
+            with open('stats-'+title+'.txt','a') as file:
+                file.write(','+str(r_value)+','+str(rmse)+','+str(mae)+','+str(bias)+','+str(D)+','+str(bss[0])+','+str(bss[1])+','+str(bss[2])+
+                        ','+str(bss[3])+','+str(bss[4]))
             
         toc = time.perf_counter()
         print('Done that domain size',dom+1,f'/3 in {(toc - tic)/60:0.2f} minutes.')
