@@ -17,7 +17,7 @@ def gefs_reanalysis(ds, period=slice("2012-11-20", "2019-12-25"), origin=0, res=
     return ds
 
 
-def era5_prep(ds, period=slice("2009-10-01","2022-01-01")):
+def era5_prep(ds, period=slice("2009-10-01","2023-05-01")):
 
     ds = ds.sel(time=period)
     ds = ds[{'longitude':slice(None,None,2),'latitude':slice(None,None,2)}]
@@ -69,7 +69,25 @@ def low_pass_filter(ds,type_str,res):
     return ds
 
 
-def resample_mean(ds, type_str,res=12):
+def weighted_mean(obj):
+    # map to take a weighted mean with first and last points weighed less
+    weights = np.ones(len(obj.step))
+    weights[0] = 0.5
+    weights[-1] = 0.5
+    weights = weights / weights.sum()
+    weights = xr.DataArray(weights,dims='step',coords={'step':obj.step.values})
+    return obj.weighted(weights).mean(dim='step')
+def weighted_mean_rolling(obj,axis=4):
+    # map to take a weighted mean with first and last points weighed less
+    weights = np.ones(obj.shape[-1])
+    weights[0] = 0.5
+    weights[-1] = 0.5
+    weights = weights / weights.sum()
+
+    return np.sum(obj * weights, axis=axis)
+
+
+def resample_mean(ds, type_str,res=6):
     # resample 5-minute obs data
     # res is number of hours per resampling period
     #origin = int((res / 2) % 24)  # modulus makes it work when res is >24
@@ -87,9 +105,13 @@ def resample_mean(ds, type_str,res=12):
         ds = ds.resample(time=res_str,origin=datetime(2007,12,1,origin)).mean()
     elif type_str == 'gefs':
         ds['step'] = ds.step.values.astype('datetime64[ns]')
-        ds = ds.resample(step=res_str,origin=datetime(2007,12,1,origin)).mean()
+        # using a custom map mean function
+        weight = xr.DataArray([0.25, 0.5, 0.25], dims=['window'])
+        ds = ds.gh.rolling(step=3,center=True).construct('window').dot(weight)  # take weighted rolling averages
+
+        ds = ds.resample(step=res_str,origin=datetime(2007,12,1,origin)).last()
         ds['step'] = ds.step.values.astype('timedelta64[ns]')
-        ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird because i subtracted the lead time earlier
+        ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird
     else:
         print('type string must be one of obs/era/gefs. exiting')
         sys.exit()
@@ -129,7 +151,14 @@ if __name__ == "__main__":
 
     #gefs = xr.open_dataset('data/gh-reanalysis-2014-01.nc').sel(isobaricInhPa=500)
     #gefs = gefs_reanalysis(gefs, period=dates, res=6)
-    era7 = xr.open_dataset('era-2009-2021-700.nc')
+    # era1 = xr.open_dataset('era-2022.grib')
+    # era1 = era5_prep(era1)
+    # era1 = era1.drop_vars(['valid_time','number','step'])
+    # era1 = era1.rename({'isobaricInhPa':'level'})
+    era = xr.open_dataset('era-2009-2022-a.nc',engine='scipy')
+    #era = xr.concat([era,era1],dim='time')
+    #era = era.drop_duplicates('time')
+    #era.to_netcdf('era-2009-2022-a.nc')
     #low_pass_filter(obs,'obs',12)
     #era = era5_prep(era)
     #era = resample_mean(era)

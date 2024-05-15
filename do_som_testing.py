@@ -357,7 +357,7 @@ if __name__ ==  "__main__":
                     ob = obsv[kk]
 
                     crps_som[BMU,kk] =ps.crps_ensemble(ob, distributions[BMU])
-                    crps_clim[BMU,kk] =ps.crps_ensemble(ob, obsv)
+                    crps_clim[BMU,kk] =ps.crps_ensemble(ob, obs)
                     mae_som_mean[BMU,kk] = np.abs(dist_means[BMU] - ob)
                     rmse_som_mean[BMU,kk] = np.square(dist_means[BMU] - ob)
                     bias_som_mean[BMU,kk] = dist_means[BMU] - ob
