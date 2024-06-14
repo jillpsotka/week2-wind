@@ -22,15 +22,16 @@ def make_dates(start_date="2012-11-25" ,number=23, max=16):
     return dates
 
 
-def get_z(n, period, mem, lat,lon, dir=''):
+def get_z(n, period, mem, fxx, lat,lon, dir=''):
     # Herbie : quick
     tic = time.perf_counter()
-    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="hgt_pres_abv700mb")
+    #H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="hgt_pres_abv700mb")
+    H = FastHerbie(period, model="gefs",product="atmos.5", member=mem,fxx=fxx)
     toc = time.perf_counter()
     #print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray
-    ds = H.xarray(":500 mb:",lats=lat,lons=lon)
+    ds = H.xarray("HGT:500 mb:",lats=lat,lons=lon)
     if len(ds.time) > len(period):  # something went wrong (e.g. nov 9 2019)
         s1 = len(ds.step)
         ds = ds.sel(time=period).isel(step=slice(int(s1/2),s1))
@@ -38,11 +39,12 @@ def get_z(n, period, mem, lat,lon, dir=''):
     toc2 = time.perf_counter()
     #print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now clipping and saving...")
 
-    steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
-    steps2 = np.arange(240,367,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
-    steps = np.concatenate([steps,steps2])
+    #steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
+    #steps2 = np.arange(240,367,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
+    #steps = np.concatenate([steps,steps2])
 
-    ds = ds.sel(latitude=lat,longitude=lon,step=steps)
+    #ds = ds.sel(latitude=lat,longitude=lon,step=steps)
+    #n+=19
     if n <10:
         title = dir + '0' + str(n) + 'gh-' + str(mem) + '.nc'
     else:
@@ -52,17 +54,17 @@ def get_z(n, period, mem, lat,lon, dir=''):
 
 
 
-def get_wind_10(n, period, mem,lat,lon,dir=''):
+def get_wind_10(n, period, mem,fxx,lat,lon,dir=''):
     # Herbie : quick
     tic = time.perf_counter()
-    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="ugrd_hgt")
-    H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="vgrd_hgt")
+    #H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="ugrd_hgt")
+    #H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="vgrd_hgt")
+    H = FastHerbie(period, model="gefs",product="atmos.5", member=mem,fxx=fxx)
 
     toc = time.perf_counter()
-    print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray: takes a long time :(
-    u_10 = H.xarray(":UGRD:10 m",lats=lat,lons=lon)
+    u_10 = H.xarray(":UGRD:10 m above ground",lats=lat,lons=lon)
     if len(u_10.time) > len(period):  # something went wrong (e.g. nov 9 2019)
         u_10 = u_10.sel(time=period) # get rid of extra day nov 8
 
@@ -75,15 +77,15 @@ def get_wind_10(n, period, mem,lat,lon,dir=''):
         u_10 = xr.concat([u_10_before,u_10_after],dim='time')
         print('problem date in', period)
 
-    steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
-    steps2 = np.arange(240,361,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
-    steps = np.concatenate([steps,steps2])
+    #steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
+    #steps2 = np.arange(240,361,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
+    #steps = np.concatenate([steps,steps2])
 
-    u_10 = u_10.sel(latitude=lat,longitude=lon,step=steps)
+    #u_10 = u_10.sel(latitude=lat,longitude=lon,step=steps)
     u_10 = u_10.drop('heightAboveGround')  # this coordinate gets in the way
     
     print('Halfway there..', datetime.now())
-    v_10 = H2.xarray(":VGRD:10 m",lats=lat,lons=lon)
+    v_10 = H.xarray(":VGRD:10 m above ground",lats=lat,lons=lon)
     v_10 = v_10.drop('heightAboveGround')  # this coordinate gets in the way
     if len(v_10.time) > len(period):  # something went wrong (e.g. nov 9 2019)
         v_10 = v_10.sel(time=period) # get rid of extra day nov 8
@@ -96,7 +98,7 @@ def get_wind_10(n, period, mem,lat,lon,dir=''):
         
         v_10 = xr.concat([v_10_before,v_10_after],dim='time')
         print('problem date in', period)
-    v_10 = v_10.sel(latitude=lat,longitude=lon,step=steps)
+    #v_10 = v_10.sel(latitude=lat,longitude=lon,step=steps)
 
     toc2 = time.perf_counter()
     print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now saving...")
@@ -110,17 +112,69 @@ def get_wind_10(n, period, mem,lat,lon,dir=''):
     print('Done that set', datetime.now())
 
 
-def get_wind_100(n, period,mem,lat,lon,dir=''):
+def get_wind_80(n, period, mem,fxx,lat,lon,dir=''):
     # Herbie : quick
     tic = time.perf_counter()
-    H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="ugrd_hgt")
-    H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="vgrd_hgt")
+    #H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="ugrd_hgt")
+    #H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="vgrd_hgt")
+    H = FastHerbie(period, model="gefs",product="atmos.5b", member=mem,fxx=fxx)
 
     toc = time.perf_counter()
-    print(f"finished FastHerbie in {toc - tic:0.2f} seconds. Now putting into xarray...")
 
     # xarray: takes a long time :(
-    u_100 = H.xarray(":UGRD:100 m",lats=lat,lons=lon)
+    u_80 = H.xarray(":UGRD:80 m above ground",lats=lat,lons=lon)
+    if len(u_80.time) > len(period):  # something went wrong (e.g. nov 9 2019)
+        u_80 = u_80.sel(time=period) # get rid of extra day nov 8
+
+        valid_before = np.where(~np.isnan(u_80.isel(longitude=1,latitude=1,time=1).u80.values))
+        u_80_before = u_80.isel(step=valid_before[0],time=0)
+
+        valid_after = np.where(~np.isnan(u_80.isel(longitude=1,latitude=1,time=2).u80.values))
+        u_80_after = u_80.isel(step=valid_after[0],time=slice(1,None))
+        
+        u_80 = xr.concat([u_80_before,u_80_after],dim='time')
+        print('problem date in', period)
+
+    u_80 = u_80.drop('heightAboveGround')  # this coordinate gets in the way
+    
+    print('Halfway there..', datetime.now())
+    v_80 = H.xarray(":VGRD:80 m above ground",lats=lat,lons=lon)
+    v_80 = v_80.drop('heightAboveGround')  # this coordinate gets in the way
+    if len(v_80.time) > len(period):  # something went wrong (e.g. nov 9 2019)
+        v_80 = v_80.sel(time=period) # get rid of extra day nov 8
+
+        valid_before = np.where(~np.isnan(v_80.isel(longitude=1,latitude=1,time=1).v80.values))
+        v_80_before = v_80.isel(step=valid_before[0],time=0)
+
+        valid_after = np.where(~np.isnan(v_80.isel(longitude=1,latitude=1,time=2).v80.values))
+        v_80_after = v_80.isel(step=valid_after[0],time=slice(1,None))
+        
+        v_80 = xr.concat([v_80_before,v_80_after],dim='time')
+        print('problem date in', period)
+
+    toc2 = time.perf_counter()
+    print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes. Now saving...")
+
+    w80 = u_80.assign(wind80=np.sqrt(u_80.u**2 + v_80.v**2))
+    if n <10:
+        title = dir + '0' + str(n) + 'wind80-' + str(mem) + '.nc'
+    else:
+        title = dir + str(n) + 'wind80-' + str(mem) + '.nc'
+    w80.wind80.to_netcdf(title)
+    print('Done that set', datetime.now())
+
+
+def get_wind_100(n, period,mem,fxx,lat,lon,dir=''):
+    # Herbie : quick
+    tic = time.perf_counter()
+    #H = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="ugrd_hgt")
+    #H2 = FastHerbie(period, model="gefs_reforecast",fxx=[100,270], member=mem, variable_level="vgrd_hgt")
+    H = FastHerbie(period, model="gefs",product="atmos.5", member=mem,fxx=fxx)
+
+    toc = time.perf_counter()
+
+    # xarray: takes a long time :(
+    u_100 = H.xarray(":UGRD:100 m above ground",lats=lat,lons=lon)
     if len(u_100.time) > len(period):  # something went wrong (e.g. nov 9 2019)
         u_100 = u_100.sel(time=period) # get rid of extra day nov 8
 
@@ -133,16 +187,16 @@ def get_wind_100(n, period,mem,lat,lon,dir=''):
         u_100 = xr.concat([u_100_before,u_100_after],dim='time')
         print('problem date in', period)
     
-    steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
-    steps2 = np.arange(240,361,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
-    steps = np.concatenate([steps,steps2])
+    #steps = np.arange(144,240,3,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 6-10 every 3 hours
+    #steps2 = np.arange(240,361,6,dtype='timedelta64[ns]')*(1000000000*60*60)  # day 10-15 every 6 hours
+    #steps = np.concatenate([steps,steps2])
 
-    u_100 = u_100.sel(latitude=lat,longitude=lon,step=steps)
+    #u_100 = u_100.sel(latitude=lat,longitude=lon,step=steps)
     u_100 = u_100.drop('heightAboveGround')
     
     print('Halfway there..', datetime.now())
 
-    v_100 = H2.xarray(":VGRD:100 m",lats=lat,lons=lon)
+    v_100 = H.xarray(":VGRD:100 m above ground",lats=lat,lons=lon)
     v_100 = v_100.drop('heightAboveGround')
     if len(v_100.time) > len(period):  # something went wrong (e.g. nov 9 2019)
         v_100 = v_100.sel(time=period) # get rid of extra day nov 8
@@ -154,7 +208,7 @@ def get_wind_100(n, period,mem,lat,lon,dir=''):
         v_100_after = v_100.isel(step=valid_after[0],time=slice(1,None))
         
         v_100 = xr.concat([v_100_before,v_100_after],dim='time')
-    v_100 = v_100.sel(latitude=lat,longitude=lon,step=steps)
+    #v_100 = v_100.sel(latitude=lat,longitude=lon,step=steps)
     toc2 = time.perf_counter()
     print(f"finished xarray in {(toc2 - toc)/60:0.2f} minutes.", datetime.now())
 
@@ -171,24 +225,28 @@ def get_wind_100(n, period,mem,lat,lon,dir=''):
 def merge_wind_data(member=0,dir=''):
     #take multiple ncs of gefs and combine them
     print('merging netcdf files...')
-    file_list = glob.glob(dir + "*wind10-"+str(member)+".nc")
+    file_list = glob.glob(dir + "*wind80-"+str(member)+".nc")
     file_list.sort()
     ds = xr.open_dataset(file_list[0])
     for file in file_list[1:]:
         ds = xr.concat([ds, xr.open_dataset(file)],dim='time')
+        os.remove(file)
+    os.remove(file_list[0])
+
+    ds = ds.wind80.sortby('time')
     
     start = str(ds.time.values[0])[:10]
     end = str(ds.time.values[-1])[:10]
 
-    file_list = glob.glob(dir + "*wind100-"+str(member)+".nc")
-    file_list.sort()
-    ds2 = xr.open_dataset(file_list[0])
-    for file in file_list[1:]:
-        ds2 = xr.concat([ds2, xr.open_dataset(file)],dim='time')
+    # file_list = glob.glob(dir + "*wind100-"+str(member)+".nc")
+    # file_list.sort()
+    # ds2 = xr.open_dataset(file_list[0])
+    # for file in file_list[1:]:
+    #     ds2 = xr.concat([ds2, xr.open_dataset(file)],dim='time')
     
-    ds = xr.merge([ds,ds2])
+    # ds = xr.merge([ds,ds2])
 
-    ds.to_netcdf(dir + 'wind-'+start+'-'+end+'-'+str(member)+'.nc')
+    ds.to_netcdf(dir + 'wind80-'+start+'-'+end+'-'+str(member)+'.nc')
 
 
 def merge_z_data(member=0,dir=''):
@@ -199,7 +257,7 @@ def merge_z_data(member=0,dir=''):
     for file in file_list[1:]:
         ds = xr.concat([ds, xr.open_dataset(file)],dim='time')
         os.remove(file)  # delete file after merging - might regret this
-
+    os.remove(file_list[0])
     ds = ds.gh.sortby('time')
     
     start = str(ds.time.values[0])[:10]
@@ -208,10 +266,10 @@ def merge_z_data(member=0,dir=''):
     ds.to_netcdf(dir + 'gh-'+start+'-'+end+'-'+str(member)+'.nc')
 
 
-def do_all_wind(n, period,mem,lat,lon,dir=''):
-    get_wind_10(n,period,mem,lat,lon,dir)
+def do_all_wind(n, period,mem,fxx,lat,lon,dir=''):
+    get_wind_10(n,period,mem,fxx,lat,lon,dir)
     print('Done 10m')
-    get_wind_100(n,period,mem,lat,lon,dir)
+    get_wind_100(n,period,mem,fxx,lat,lon,dir)
 
 
 
@@ -221,28 +279,32 @@ if __name__ == '__main__':
     big_tic = time.perf_counter()
 
     # set search params
-    chunks = 266 #53 #23 #266
+    chunks = 60 #53 #23 #266
     days = 7  #7 #16
     # nov 9 has to be on day 1 (?)
-    date_list = make_dates("2012-11-20", number=chunks, max=days)  # 2012-11-20 start
+    date_list = make_dates("2021-03-22", number=chunks, max=days)  # 2012-11-20 start
+    # TODO: want a few more steps ahead for averaging sake >:( for day 6
+    fxx = range(144,190,3)
     #date_list = make_dates("2017-12-22", number=chunks, max=days)  # 2018-12-26 start
     #date_list = make_dates("2019-11-09",number=1,max=7)
-    #lats = np.arange(55.5,56.5,0.5)[::-1]
-    #lons = np.arange(239.5,240.5,0.5)
-    lats = np.arange(44,66.5,0.5)[::-1]
-    lons = np.arange(220,260.5,0.5)
-    dir = "data/"
-    for member in range(3,5):
+    lats = np.arange(55.5,56.5,0.5)[::-1]
+    lons = np.arange(239.5,240.5,0.5)
+    #lats = np.arange(44,66.5,0.5)[::-1]
+    #lons = np.arange(220,260.5,0.5)
+    dir = "data/gefs-wind-"
+    for member in range(0,31):
 
         #do_all_wind(46,date_list[0],member,lats,lons,dir)
 
-        pool = multiprocessing.Pool(3)
+        #pool = multiprocessing.Pool(1)
         #processes = [pool.apply_async(do_all_wind, args=(j, date_list[j],member,lats,lons,dir))for j in range(len(date_list))]
-        processes = [pool.apply_async(get_z, args=(j, date_list[j],member,lats,lons,dir))for j in range(len(date_list))]
-        result = [p.get() for p in processes]
-
-        #merge_wind_data(member,dir)
-        merge_z_data(member,dir)
+        #processes = [pool.apply_async(get_z, args=(j, date_list[j],member,fxx,lats,lons,dir))for j in range(len(date_list))]
+        #result = [p.get() for p in processes]
+        for j in range(len(date_list)):
+            #get_z(j, date_list[j],member,fxx,lats,lons,dir)
+            get_wind_80(j, date_list[j],member,fxx,lats,lons,dir)
+        merge_wind_data(member,dir)
+        #merge_z_data(member,dir)
 
         big_toc = time.perf_counter()
         print(f"finished the whole shebang in {(big_toc - big_tic)/60:0.2f} minutes or {(big_toc - big_tic)/3600:0.2f} hours.")

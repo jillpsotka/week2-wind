@@ -477,13 +477,12 @@ if __name__ ==  "__main__":
         for y in range(1,x+1):
             if x*y < 37:
                 sizes.append((x,y))
-    sizes = [(5,5)]
 
-    lat_dif = [9]  # domain size (degrees on each side of the center)
-    lon_dif = [16]
+    lat_dif = [9,11]  # domain size (degrees on each side of the center)
+    lon_dif = [16,20]
     res = 6  # time resolution of map in hours
-    res_obs = 24
-    t_step = slice(np.array(int(7*24*1e9*60*60),dtype='timedelta64[ns]'),np.array(int(7.9*24*1e9*60*60),dtype='timedelta64[ns]'))
+    res_obs = 6
+    t_step = slice(np.array(int(8*24*1e9*60*60),dtype='timedelta64[ns]'),np.array(int(8.9*24*1e9*60*60),dtype='timedelta64[ns]'))
     #t_step = np.array(int(7*24*1e9*60*60),dtype='timedelta64[ns]')
 
     anomaly = True  # get rid of seasonal anomaly
@@ -495,14 +494,14 @@ if __name__ ==  "__main__":
     print('Loading data...')
     obs_full = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc')
     obs_full = resample_mean(obs_full,'obs',res)
-    obs_full = obs_full.sel(index=obs_full.index.dt.season=='DJF')
+    obs_full = obs_full.sel(index=obs_full.index.dt.season=='JJA')
     obs_train = obs_full.sel(index=train_period)
     obsv = obs_full.sel(index=val_period)
     obsv = obsv.dropna(dim='index')
 
     obs_full = None
 
-    title = '6h-5x5-winter'
+    title = '6h-summer-1000'
 
     with open('stats-'+title+'.txt', 'w') as file:
         file.write('Nx,Ny,Nnodes,lat,lon,TE,QE,EV,PF,WSS,KS-frac,range,std,PF-gefs,WSS-gefs,KS-gefs'+

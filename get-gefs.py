@@ -18,9 +18,9 @@ XX = "00"  # initialization time
 forecast_hours_1 = np.arange(141,240,3)
 forecast_hours_2 = np.arange(240,365,6)
 forecast_hours = np.concatenate([forecast_hours_1,forecast_hours_2])
-date_range = pd.date_range("2020-09-26", "2023-12-31", freq="D")
+date_range = pd.date_range("2024-01-01", "2024-05-01", freq="D")
 var = "z"  # choose wind or z
-members = [1]
+members = [18]
 
 
 
@@ -34,7 +34,7 @@ if var == "wind":
 elif var == "z":
     batch = "pgrb2ap5"
     leveltype = "isobaricInhPa"
-    level = [1000,700,500]
+    level = [500,700,850,1000]
     short = "gh"
     lats = np.arange(44,66.5,0.5)[::-1]
     lons = np.arange(220,260.5,0.5)

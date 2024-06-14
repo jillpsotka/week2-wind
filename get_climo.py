@@ -303,7 +303,7 @@ def make_histograms(ds):
 
     groups = ds.groupby("index.year")
     bins = np.arange(20)
-    fig, axes = plt.subplots(2,int(len(groups)/2),figsize=(20,7),gridspec_kw = {'wspace':0.5, 'hspace':0.25})
+    fig, axes = plt.subplots(2,8,figsize=(20,7),gridspec_kw = {'wspace':0.5, 'hspace':0.35})
     
     j = 0
 
@@ -311,31 +311,27 @@ def make_histograms(ds):
         data = i[1]
         ax = axes.flatten()[j]
         ax.hist(data.Wind.values,bins=bins)
-        ax.set_title(str(i[0]))
+        ax.set_title(str(i[0])+'\n'+str(round(np.nanmean(data.Wind.values),1)))
         ax.set_xticks(bins[::2])
         j+=1
     fig.suptitle('5-min wind speed obs by year')
     
     plt.show()
-    fig.savefig('histograms.png')
+    fig.savefig('plots/histograms-spring.png')
 
     print('done')
 
 
 
 if __name__ == '__main__':
-    #obs = qc_obs('bm_2023-end.txt')
+    #obs = qc_obs('~/Nextcloud/thesis/bm_2024.txt')
     #obs = obs.to_xarray()
     #obs.Wind.to_netcdf('data/bm_2023_cleaned.nc')
 
-    obs = xr.open_dataset('data/bm_cleaned_all.nc')
-    make_histograms(obs)
+    obs = xr.open_dataset('~/Nextcloud/thesis/bm_cleaned_all.nc')
+
+    #obs = xr.concat([obs_og,obs],dim='index').drop_duplicates(dim='index')
+    obs_summer = obs.sel(index=obs.index.dt.season=='MAM')
+    make_histograms(obs_summer)
     #obs1 = xr.open_dataset('data/bm_cleaned_2009-2013.nc')
-    #obs = resample_data(obs,6)
-
-    #climo = make_climo_6(obs)
-
-    #climo = climo.to_xarray()
-    #climo.to_netcdf('data/climo-daily.nc')
-
     print('Done!')

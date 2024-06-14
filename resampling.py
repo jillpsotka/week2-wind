@@ -85,6 +85,14 @@ def weighted_mean_rolling(obj,axis=4):
     weights = weights / weights.sum()
 
     return np.sum(obj * weights, axis=axis)
+def findMiddle(input_list,axis=2):
+    middle = float((input_list.shape[-1]))/2
+    if middle < 1:
+        return input_list[:,:,0]
+    if middle % 2 != 0:
+        return input_list[:,:,int(middle)]
+    else:
+        return np.mean((input_list[:,:,int(middle)], input_list[:,:,int(middle-1)]),axis=0)
 
 
 def resample_mean(ds, type_str,res=6):
@@ -103,15 +111,60 @@ def resample_mean(ds, type_str,res=6):
         ds = ds.resample(index=res_str,origin=datetime(2007,12,1,origin)).mean()
     elif type_str == 'era':
         ds = ds.resample(time=res_str,origin=datetime(2007,12,1,origin)).mean()
-    elif type_str == 'gefs':
+    elif type_str == 'gefs':  # jill check
+        ds10 = ds.sel(step=slice(np.array(int(9.75*24*1e9*60*60),dtype='timedelta64[ns]'),  # after day 10
+                                np.array(int(16*24*1e9*60*60),dtype='timedelta64[ns]')))
+        ds = ds.sel(step=slice(np.array(int(5*24*1e9*60*60),dtype='timedelta64[ns]'),  # up to day 10
+                                np.array(int(11*24*1e9*60*60),dtype='timedelta64[ns]')))
+        
         ds['step'] = ds.step.values.astype('datetime64[ns]')
+        ds10['step'] = ds10.step.values.astype('datetime64[ns]')
+
         # using a custom map mean function
         weight = xr.DataArray([0.25, 0.5, 0.25], dims=['window'])
         ds = ds.gh.rolling(step=3,center=True).construct('window').dot(weight)  # take weighted rolling averages
+        ds = ds.dropna(dim='step',how='all')
 
-        ds = ds.resample(step=res_str,origin=datetime(2007,12,1,origin)).last()
+        weight = xr.DataArray([0.5, 0.5], dims=['window'])
+        ds10 = ds10.gh.rolling(step=2,center=True).construct('window').dot(weight)  # take weighted rolling averages
+        ds10 = ds10.dropna(dim='step',how='all')
+
+        ds = xr.concat([ds, ds10],dim='step').drop_duplicates(dim='step')
+
+        ds = ds.resample(step='6H',origin=datetime(2007,12,1,origin)).last()
         ds['step'] = ds.step.values.astype('timedelta64[ns]')
-        ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird
+        #ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird
+    elif type_str == 'gefs-wind':
+        # i think split things into before day 10 and after to simplify rolling stuff?
+        ds10 = ds.sel(step=slice(np.array(int(9.75*24*1e9*60*60),dtype='timedelta64[ns]'),  # after day 10
+                                np.array(int(16*24*1e9*60*60),dtype='timedelta64[ns]')))
+        ds = ds.sel(step=slice(np.array(int(5*24*1e9*60*60),dtype='timedelta64[ns]'),  # up to day 10
+                                np.array(int(11*24*1e9*60*60),dtype='timedelta64[ns]')))
+        weights = np.ones(int((res/3)+1))
+        weights[0] = 0.5
+        weights[-1] = 0.5
+        weights = weights / weights.sum()
+        ds['step'] = ds.step.values.astype('datetime64[ns]')
+        # using a custom map mean function
+        weight = xr.DataArray(weights, dims=['window'])
+        ds = ds.wind.rolling(step=len(weight),center=True,min_periods=res/(3*2)).construct('window').dot(weight)  # take weighted rolling averages
+        ds = ds.dropna(dim='step',how='all')
+
+        weights = np.ones(int((res/6)+1))
+        weights[0] = 0.5
+        weights[-1] = 0.5
+        weights = weights / weights.sum()
+        ds10['step'] = ds10.step.values.astype('datetime64[ns]')
+        # using a custom map mean function
+        weight = xr.DataArray(weights, dims=['window'])
+        ds10 = ds10.wind.rolling(step=len(weight),center=True,min_periods=res/(6*2)).construct('window').dot(weight)  # take weighted rolling averages
+        ds10 = ds10.dropna(dim='step',how='all')
+
+        # merge before resampling
+        ds = xr.concat([ds, ds10],dim='step').drop_duplicates(dim='step')
+        ds = ds.resample(step=res_str,origin=datetime(2007,12,1,origin)).reduce(findMiddle)#last()
+        ds['step'] = ds.step.values.astype('timedelta64[ns]')
+        #ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird
     else:
         print('type string must be one of obs/era/gefs. exiting')
         sys.exit()
@@ -151,14 +204,14 @@ if __name__ == "__main__":
 
     #gefs = xr.open_dataset('data/gh-reanalysis-2014-01.nc').sel(isobaricInhPa=500)
     #gefs = gefs_reanalysis(gefs, period=dates, res=6)
-    # era1 = xr.open_dataset('era-2022.grib')
-    # era1 = era5_prep(era1)
-    # era1 = era1.drop_vars(['valid_time','number','step'])
-    # era1 = era1.rename({'isobaricInhPa':'level'})
-    era = xr.open_dataset('era-2009-2022-a.nc',engine='scipy')
-    #era = xr.concat([era,era1],dim='time')
-    #era = era.drop_duplicates('time')
-    #era.to_netcdf('era-2009-2022-a.nc')
+    era1 = xr.open_dataset('era-850-2009.grib')
+    era1 = era5_prep(era1)
+    era1 = era1.drop_vars(['valid_time','number','step'])
+    era1 = era1.rename({'isobaricInhPa':'level'})
+    era = xr.open_dataset('era-850-2009-2022.nc')
+    era = xr.concat([era1,era],dim='time')
+    era = era.drop_duplicates('time')
+    era.to_netcdf('era-850-2009-2022.nc')
     #low_pass_filter(obs,'obs',12)
     #era = era5_prep(era)
     #era = resample_mean(era)
