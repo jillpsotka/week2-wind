@@ -136,68 +136,15 @@ def monitor_training(som):
     return None
 
 
-
-def plot_som(Nx, Ny, z, indices):
-    proj=ccrs.PlateCarree()
-    vmin = np.min(z)
-    vmax = np.max(z)  # colorbar range
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx,sharex=True,sharey='row',layout='constrained',figsize=(Nx*4,Ny*4),subplot_kw={'projection': proj, 'aspect':1.5},gridspec_kw = {'wspace':0.03, 'hspace':0.1})
-    im = comap.ScalarMappable(norm=Normalize(vmin,vmax),cmap=cm.acton)
-    for kk, ax in enumerate(axes.flatten()):
-        var = z[indices[kk],:].reshape(45,81)
-        ax.set_extent(([219,261,43.25,65.25]))
-        ax.set_title('Node '+str(indices[kk]))      
-        
-        ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
-            name='admin_0_boundary_lines_land', scale='50m', facecolor='none', edgecolor='k',alpha=0.4,linewidth=0.6))
-        ax.add_feature(cfeature.NaturalEarthFeature(category='cultural', 
-            name='admin_1_states_provinces_lines', scale='50m',facecolor='none', edgecolor='k',alpha=0.3,linewidth=0.6))
-        ax.add_feature(cfeature.NaturalEarthFeature('physical', 'ocean', \
-            scale='50m', edgecolor='k', facecolor='none', alpha=0.4,linewidth=0.6))
-        
-        cs = ax.contourf(lon, lat, var, vmin=vmin,vmax=vmax, transform=ccrs.PlateCarree(),cmap=cm.acton)
-        ax.scatter(360-120.4306,55.6986,c='k',transform=ccrs.PlateCarree(),s=6,marker='*')
-
-        # Create gridlines
-        gl = ax.gridlines(crs=ccrs.PlateCarree(), linewidth=0.8, color='black', alpha=0.2,linestyle='--')
-        # Manipulate gridlines number and spaces
-        gl.ylocator = mticker.FixedLocator(np.arange(-90,90,10))
-        gl.xlocator = mticker.FixedLocator(np.arange(-180, 180, 10))
-        gl.xlabel_style = {'size': 8,'rotation':25}
-        gl.ylabel_style = {'size': 8} 
-        if kk > (Ny*Nx) - Nx - 1:
-            gl.bottom_labels = True
-        if kk % Nx == 0:
-            gl.left_labels = True
-
-    #cbar_ax = fig.add_axes([0.05, 0.07, 0.45*Nx, 0.03])
-    cbar = fig.colorbar(im,ax=axes,fraction=0.046, pad=0.04,orientation='horizontal')
-    if anomaly:
-        cbar.set_label('z500 anomaly (m)')
-    else:
-        cbar.set_label('z500 (m)')
-    plt.suptitle('z500 clusters')
-    plt.show()
-
-    return None
-
-
 def wind_distributions(bmus):
     
     distributions = []
-    fig, axes = plt.subplots(nrows=Ny, ncols=Nx, gridspec_kw = {'wspace':0.5, 'hspace':0.5})
-    #vmin = np.min(obs)
-    #vmax = np.max(obs)
+    axes = np.empty((Nx,Ny))
     
     for i, ax in enumerate(axes.flatten()):
         distribution = obs[np.where(bmus==i)[0]]  # wind obs that belong to this node -> this is our distribution
-        #ax.hist(distribution, range=(vmin,vmax),bins='auto')
-        #ax.set_title('Mean ='+str(round(np.mean(distribution),2))+'m/s, Median ='+str(round(np.median(distribution),2))+'m/s')
         distributions.append(distribution)
-    plt.close(fig)
 
-    #plt.tight_layout()
-    #plt.show()
     with open('distributions-'+title,'wb') as f:
         pickle.dump(distributions,f)
 
@@ -261,7 +208,7 @@ def gefs_stats(bad_nodes,f):
         leads = t_step
     obsv_loc = obs_val.copy(deep=True)  # does not include nan
     res_str = str(res_obs) + 'h'
-    files = glob.glob('data/z-gefs/gefs-z-*')
+    files = glob.glob('/users/jpsotka/Nextcloud/z-gefs/gefs-z-*')
     print(len(files), ' members to process ' ,datetime.now())
     time_axis = pd.date_range(val_period_gefs.start,val_period_gefs.stop,freq=res_str)
 
@@ -335,7 +282,7 @@ def gefs_stats(bad_nodes,f):
         D_list = []
         ks_list=[]
         PF_list = []
-        for tt,t in enumerate(t_step):  # for each lead time
+        for tt,t in enumerate(t_step_testing):  # for each lead time
             obsv_loc = obs_val.copy(deep=True)  # reset
 
             dist_arr = dist_xr.sel(leadtime=t)
@@ -364,6 +311,7 @@ def gefs_stats(bad_nodes,f):
                         else:
                             dist_list.append(np.concatenate([distributions[int(e)] for e in c if ~np.isnan(e)]))
                     else:
+                        obsv_loc['Wind'][kk] = np.nan
                         continue
                 dist_list = np.concatenate(dist_list)
                 if np.isnan(dist_list).all():
@@ -537,7 +485,6 @@ if __name__ ==  "__main__":
                 sizes.append((x,y))
 
     seas = 'JJA'
-    title = '24h-summer-1000'
 
     lat_dif = [9,11]  # domain size (degrees on each side of the center)
     lon_dif = [16,20]
@@ -548,22 +495,18 @@ if __name__ ==  "__main__":
     train_period=slice("2009-10-01","2020-09-23")
     val_period = slice("2020-10-01","2022-03-31")
     val_period_gefs = slice("2020-09-24","2022-03-24")
-    level = 1000
+    levels = [500,700,850,1000]
 
     # this is for lead time. if res > 6H, t_step is slice so that we pick up multiple z forecasts
     t_step = []
+    t_step_testing = [np.array(int(6*24*1e9*60*60),dtype='timedelta64[ns]'),np.array(int(8*24*1e9*60*60),dtype='timedelta64[ns]'),
+                      np.array(int(10*24*1e9*60*60),dtype='timedelta64[ns]'),np.array(int(12*24*1e9*60*60),dtype='timedelta64[ns]'),
+                      np.array(int(14*24*1e9*60*60),dtype='timedelta64[ns]')]
     for d in range(6,15): # each day in week 2
-        if res == 24:
-            t_step.append(slice(np.array(int((d*24+3)*1e9*60*60),dtype='timedelta64[ns]'),  # adding 3 hours for index shift
-                                np.array(int(((d+0.9)*24+3)*1e9*60*60),dtype='timedelta64[ns]')))
-        elif res == 6:
-            t_step.append(np.array(int(d*24*1e9*60*60),dtype='timedelta64[ns]'))
-            t_step.append(np.array(int((d*24+6)*1e9*60*60),dtype='timedelta64[ns]'))
-            t_step.append(np.array(int((d*24+12)*1e9*60*60),dtype='timedelta64[ns]'))
-            t_step.append(np.array(int((d*24+18)*1e9*60*60),dtype='timedelta64[ns]'))
-        else:
-            print('only configured for 6h and 24 resolutions right now')
-            raise ValueError
+        t_step.append(np.array(int(d*24*1e9*60*60),dtype='timedelta64[ns]'))
+        t_step.append(np.array(int((d*24+6)*1e9*60*60),dtype='timedelta64[ns]'))
+        t_step.append(np.array(int((d*24+12)*1e9*60*60),dtype='timedelta64[ns]'))
+        t_step.append(np.array(int((d*24+18)*1e9*60*60),dtype='timedelta64[ns]'))
 
     print('Loading data...')
 
@@ -577,88 +520,91 @@ if __name__ ==  "__main__":
     obs_val = obs_val.dropna(dim='index')
 
     obs_full = None
-    write_file_list = ['stats-'+title+'-0.txt','stats-'+title+'-1.txt',
-                       'stats-'+title+'-2.txt']
-    for f in write_file_list:
-        with open(f, 'w') as file:
-            file.write('Nx,Ny,Nnodes,lat,lon,TE,QE,EV,PF,WSS,KS-frac,range,std,PF-gefs,KS-gefs'+
-                    ',CRPSS,R-gefs,mae-gefs,bias-gefs,D-gefs,bss-gefs,frac-discarded')
-        
-    for dom in range(len(lat_dif)):  # for each domain size
-        lat_offset = lat_dif[dom]
-        lon_offset = lon_dif[dom]
-        lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
-        lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
 
-        if level == 850:
-            era = xr.open_dataset('era-850-2009-2022.nc').sel(latitude=lat,longitude=lon-360)
-        else:
-            era = xr.open_dataset('era-2009-2022-a.nc').sel(latitude=lat,longitude=lon-360,level=level)
-        erav = era.sel(time=val_period)
-        era = era.sel(time=train_period)
-        tic = time.perf_counter()
-
-        if anomaly:
-            print('Processing data...')
-            # taking out all (spatial and temporal) anomaly
-            clim = era.groupby("time.dayofyear").mean(dim=["time"])  # clim for each doy for each pixel
-            clim_concat = xr.concat([clim.isel(dayofyear=slice(330,366)),clim,clim.isel(dayofyear=slice(0,36))],dim='dayofyear')
-            cutoff=0.03
-            b, a = signal.butter(5, cutoff, btype='lowpass')
-            dUfilt = signal.filtfilt(b, a, clim_concat.gh.values,axis=0)
-            dUfilt = dUfilt[36:-36,:,:]
-            clim.gh.values = dUfilt
-
-            era = era.groupby("time.dayofyear") - clim
-            erav = erav.groupby("time.dayofyear") - clim
-        era = resample_mean(era,'era',res)
-        erav = resample_mean(erav,'era',res)
-        erav = erav.sel(time=obs_val.index.values)  # only keep indices with valid obs
-
-        obs, era = dates_obs_gefs(obs_train, era)
-        obs, era = prep_data(era, obs)
-        #a, erav = dates_obs_gefs(obsv, erav)
-        #obsv = obsv.Wind.to_numpy()
-
-        # normalize data (this is actually the z score)
-        era_mean = np.mean(era) 
-        era_std = np.std(era)
-        era = (era - era_mean) / era_std  # normalizing each time frame
-
-        for (Nx, Ny) in sizes:
-            N_nodes = Nx * Ny
-            for f in write_file_list:
-                with open(f,'a') as file:
-                    file.write('\n'+str(Nx)+','+str(Ny)+','+str(N_nodes)+','+str(lat_offset)+','+str(lon_offset))
-
-            print('\n training map...',Nx,'x',Ny,flush=True)
-            som = train_som(era)
+    for level in levels:
+        title = '24h-'+seas+'-'+str(level)
+        write_file_list = ['stats-'+title+'-0.txt','stats-'+title+'-1.txt',
+                        'stats-'+title+'-2.txt']
+        for f in write_file_list:
+            with open(f, 'w') as file:
+                file.write('Nx,Ny,Nnodes,lat,lon,TE,QE,EV,PF,WSS,KS-frac,range,std,PF-gefs,KS-gefs'+
+                        ',CRPSS,R-gefs,mae-gefs,bias-gefs,D-gefs,bss-gefs,frac-discarded')
             
-            indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
-            bmus = BMUs(som)  # the nodes that each gh best matches
-            distributions = wind_distributions(bmus)
-            freq = BMU_frequency(som)  # frequency of each node
+        for dom in range(len(lat_dif)):  # for each domain size
+            lat_offset = lat_dif[dom]
+            lon_offset = lon_dif[dom]
+            lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
+            lon = np.arange(240-lon_offset,240+lon_offset+0.5,0.5)
 
-            # map-based validation statistics
-            map_stats()
- 
-            bad_nodes = era_stats()  # nested list. goes from no filter to aggressive
-            good_ind = []
-            for b in range(len(bad_nodes)):
-                if len(bad_nodes[b]) == N_nodes:  # if all nodes are bad
-                    print('all nodes bad')
-                else:
-                    good_ind.append(b)
-            if len(good_ind) == 0:
-                print('all version of this map bad')
-                continue
+            if level == 850:
+                era = xr.open_dataset('era-850-2009-2022.nc').sel(latitude=lat,longitude=lon-360)
             else:
-                # validation statistics for gefs
-                print('getting gefs stuff')
-                gefs_stats([bad_nodes[g] for g in good_ind],[write_file_list[g] for g in good_ind])
+                era = xr.open_dataset('era-2009-2022-a.nc').sel(latitude=lat,longitude=lon-360,level=level)
+            erav = era.sel(time=val_period)
+            era = era.sel(time=train_period)
+            tic = time.perf_counter()
 
-        toc = time.perf_counter()
-        print('Done that domain size',dom+1,f'/2 in {(toc - tic)/60:0.2f} minutes.')
-    print('Done',datetime.now())
+            if anomaly:
+                print('Processing data...')
+                # taking out all (spatial and temporal) anomaly
+                clim = era.groupby("time.dayofyear").mean(dim=["time"])  # clim for each doy for each pixel
+                clim_concat = xr.concat([clim.isel(dayofyear=slice(330,366)),clim,clim.isel(dayofyear=slice(0,36))],dim='dayofyear')
+                cutoff=0.03
+                b, a = signal.butter(5, cutoff, btype='lowpass')
+                dUfilt = signal.filtfilt(b, a, clim_concat.gh.values,axis=0)
+                dUfilt = dUfilt[36:-36,:,:]
+                clim.gh.values = dUfilt
+
+                era = era.groupby("time.dayofyear") - clim
+                erav = erav.groupby("time.dayofyear") - clim
+            era = resample_mean(era,'era',res)
+            erav = resample_mean(erav,'era',res)
+            erav = erav.sel(time=obs_val.index.values)  # only keep indices with valid obs
+
+            obs, era = dates_obs_gefs(obs_train, era)
+            obs, era = prep_data(era, obs)
+            #a, erav = dates_obs_gefs(obsv, erav)
+            #obsv = obsv.Wind.to_numpy()
+
+            # normalize data (this is actually the z score)
+            era_mean = np.mean(era) 
+            era_std = np.std(era)
+            era = (era - era_mean) / era_std  # normalizing each time frame
+
+            for (Nx, Ny) in sizes:
+                N_nodes = Nx * Ny
+                for f in write_file_list:
+                    with open(f,'a') as file:
+                        file.write('\n'+str(Nx)+','+str(Ny)+','+str(N_nodes)+','+str(lat_offset)+','+str(lon_offset))
+
+                print('\n training map...',Nx,'x',Ny,flush=True)
+                som = train_som(era)
+                
+                indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
+                bmus = BMUs(som)  # the nodes that each gh best matches
+                distributions = wind_distributions(bmus)
+                freq = BMU_frequency(som)  # frequency of each node
+
+                # map-based validation statistics
+                map_stats()
+    
+                bad_nodes = era_stats()  # nested list. goes from no filter to aggressive
+                good_ind = []
+                for b in range(len(bad_nodes)):
+                    if len(bad_nodes[b]) == N_nodes:  # if all nodes are bad
+                        print('all nodes bad')
+                    else:
+                        good_ind.append(b)
+                if len(good_ind) == 0:
+                    print('all versions of this map bad')
+                    continue
+                else:
+                    # validation statistics for gefs
+                    print('getting gefs stuff')
+                    gefs_stats([bad_nodes[g] for g in good_ind],[write_file_list[g] for g in good_ind])
+
+            toc = time.perf_counter()
+            print('Done that domain size',dom+1,f'/2 in {(toc - tic)/60:0.2f} minutes.')
+        print('Done',datetime.now())
 
         

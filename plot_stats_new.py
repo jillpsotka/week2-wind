@@ -232,16 +232,53 @@ def compare_levels(ds,season=''):
 
     return None
 
+
 def get_best(ds):
-    crpss_7 = []
+    # find the best performing maps at each lead time
+    crpss_avg = []
+    crpss_6 = []
+    crpss_8 = []
+    crpss_10 = []
+    crpss_12 = []
+    crpss_14 = []
     for crpss in ds['CRPSS']:
         if crpss:
-            crpss_7.append(crpss[5])
+            crpss_6.append(crpss[0])
+            crpss_8.append(crpss[1])
+            crpss_10.append(crpss[2])
+            crpss_12.append(crpss[3])
+            crpss_14.append(crpss[4])
+            crps_ls = []
+            for c in crpss:
+                crps_ls.append(c)
+            crpss_avg.append(np.mean(crps_ls))
         else:
-            crpss_7.append(np.nan)
-    ds['crpss_7'] = crpss_7
+            crpss_avg.append(np.nan)
+    ds['crpss_avg'] = crpss_avg
+    ds['crpss_6'] = crpss_6
+    ds['crpss_8'] = crpss_8
+    ds['crpss_10'] = crpss_10
+    ds['crpss_12'] = crpss_12
+    ds['crpss_14'] = crpss_14
 
-    ds = ds.sort_values(['crpss_7'],na_position='first')
+    ds = ds.sort_values(['crpss_avg'],na_position='first')
+    ds = ds.reset_index()
+    ds=ds.drop(range(int(0.25*ds.shape[0])))  # drop worst quarter
+
+    best_avg = ds.loc[ds['crpss_avg'].idxmax()]
+    best_6 = ds.loc[ds['crpss_6'].idxmax()]
+    best_8 = ds.loc[ds['crpss_8'].idxmax()]
+    best_10 = ds.loc[ds['crpss_10'].idxmax()]
+    best_12 = ds.loc[ds['crpss_12'].idxmax()]
+    best_14 = ds.loc[ds['crpss_14'].idxmax()]
+
+    plt.plot(best_avg['CRPSS'],label='avg')
+    plt.plot(best_6['CRPSS'],label='6')
+    plt.plot(best_8['CRPSS'],label='8')
+    plt.plot(best_10['CRPSS'],label='10')
+    plt.plot(best_12['CRPSS'],label='12')
+    plt.plot(best_14['CRPSS'],label='14')
+    plt.legend()
 
     return ds
 
@@ -279,14 +316,31 @@ def add_quotes_to_nested_lists(line):
     return line
 
 def mems():
-    season = 'summer'
-    s1000_0 = 'stats-6h-'+season+'-1000-0.txt'
-    s1000_1 = 'stats-6h-'+season+'-1000-1.txt'
-    s1000_2= 'stats-6h-'+season+'-1000-2.txt'
-    s1000_3= 'stats-6h-'+season+'-1000-3.txt'
+    season = 'JJA'
+    # s1000_0 = 'stats-24h-'+season+'-1000-0.txt'
+    # s1000_1 = 'stats-24h-'+season+'-1000-1.txt'
+    # s1000_2= 'stats-24h-'+season+'-1000-2.txt'
 
-    titles = [season+' 1000 0',season+' 1000 1',season+' 1000 2',season+' 1000 3']
-    files = [s1000_0,s1000_1,s1000_2,s1000_3]
+    # s850_0 = 'stats-24h-'+season+'-850-0.txt'
+    # s850_1 = 'stats-24h-'+season+'-850-1.txt'
+    # s850_2= 'stats-24h-'+season+'-850-2.txt'
+
+    # s700_0 = 'stats-24h-'+season+'-700-0.txt'
+    # s700_1 = 'stats-24h-'+season+'-700-1.txt'
+    # s700_2= 'stats-24h-'+season+'-700-2.txt'
+
+    s500_0 = 'stats-24h-'+season+'-500-0.txt'
+    s500_1 = 'stats-24h-'+season+'-500-1.txt'
+    s500_2= 'stats-24h-'+season+'-500-2.txt'
+
+    titles = [season+' 500 0',season+' 500 1',season+' 500 2']
+    files = [s500_0,s500_1,s500_2]
+
+    # titles = [season+' 1000 0',season+' 1000 1',season+' 1000 2',
+    #           season+' 850 0',season+' 850 1',season+' 850 2',
+    #           season+' 700 0',season+' 700 1',season+' 700 2',
+    #           season+' 500 0',season+' 500 1',season+' 500 2']
+    # files = [s1000_0,s1000_1,s1000_2,s850_0,s850_1,s850_2,s700_0,s700_1,s700_2,s500_0,s500_1,s500_2]
 
     indv_ds = []
 
@@ -340,15 +394,15 @@ def mems():
             if not stats['mae-gefs'][l]:  # this map had all bad nodes
                 stats=stats.drop(l)
                 continue
-            if int(stats['frac-discarded'][l][3]) > 5:
-                stats=stats.drop(l)
-                continue
             if stats['CRPSS'][l][0] == '-':
                 stats=stats.drop(l)
                 continue
             for s in list_str:
                 stats[s][l] = stats[s][l].replace('nan', 'np.nan')
                 stats[s][l] = eval(stats[s][l])
+            if stats['frac-discarded'][l][0] > 0.5 or stats['frac-discarded'][l][1] > 0.5 or stats['frac-discarded'][l][2] > 0.5:
+                stats=stats.drop(l)
+                continue
 
         indv_ds.append(stats)
 
