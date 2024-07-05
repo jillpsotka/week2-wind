@@ -342,6 +342,18 @@ def gefs_stats(bad_nodes,f):
                 print('bad things!!!')
                 os.abort()
             discarded.append(nan_count / (nan_count + len(dists_time)))
+            if discarded[-1] > 0.6:
+                r_list.append(np.nan)
+                crps_list.append(np.nan)
+                bs_list.append(np.nan)
+                mae_list.append(np.nan)
+                bias_list.append(np.nan)
+                crpss_list.append(np.nan)
+                discarded.append(np.nan)
+                D_list.append(np.nan)
+                ks_list.append(np.nan)
+                PF_list.append(np.nan)
+                continue
             
             # remake some of the map stats based on the new distributions
             # pseudo-F and K-S both tell us about the uniqueness of the distributions
@@ -373,7 +385,7 @@ def gefs_stats(bad_nodes,f):
 
                 crps_som[i] =ps.crps_ensemble(ob1, dists_time[i,:])
                 crps_clim[i] =ps.crps_ensemble(ob1, clim_prob.sel(index=clim_prob.index.hour==gh.time.dt.hour).Wind)
-            crpss = np.nanmean(1-crps_som/crps_clim)
+            crpss = np.nanmedian(1-crps_som/crps_clim)
 
             ks_sig_frac = sig_count / len(dist_means)  # perentage of nodes that have significantly different distribution
             PF = (np.sum(BSS_nodes)/(len(dist_means)-1)) / (WSS/(m-len(dist_means)))  # pseudo-F statistic
@@ -428,7 +440,7 @@ def gefs_stats(bad_nodes,f):
                 brier_clim = brier_score_loss(target, np.repeat(prob_clim,len(target)))
                 bss.append(1 - brier/brier_clim)
             r_list.append(r_value)
-            crps_list.append(np.nanmean(crps_som))
+            crps_list.append(np.nanmedian(crps_som))
             bs_list.append(bss)
             bias_list.append(bias)
             mae_list.append(mae)
@@ -463,7 +475,7 @@ def era_stats():
     for j,d in enumerate(distributions):  # for each node
         # calculate total crpss for each node
         crpss = np.nanmean(1-crps_som[j,:]/crps_clim[j,:])
-        if crpss < -0.5:
+        if crpss < -10:
             bad_nodes[0].append(j)
         if crpss < 0.01:  # flag indices of 'bad' nodes
             bad_nodes[1].append(j)
@@ -495,7 +507,7 @@ if __name__ ==  "__main__":
     train_period=slice("2009-10-01","2020-09-23")
     val_period = slice("2020-10-01","2022-03-31")
     val_period_gefs = slice("2020-09-24","2022-03-24")
-    levels = [500,700,850,1000]
+    levels = [700]
 
     # this is for lead time. if res > 6H, t_step is slice so that we pick up multiple z forecasts
     t_step = []
@@ -522,7 +534,7 @@ if __name__ ==  "__main__":
     obs_full = None
 
     for level in levels:
-        title = '24h-'+seas+'-'+str(level)
+        title = '24h-'+seas+'-'+str(level)+'-test'
         write_file_list = ['stats-'+title+'-0.txt','stats-'+title+'-1.txt',
                         'stats-'+title+'-2.txt']
         for f in write_file_list:

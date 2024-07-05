@@ -20,6 +20,8 @@ import os
 from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
+import math
+from seaborn import violinplot as violin
 
 # testing and plotting
 
@@ -224,7 +226,13 @@ def get_climo_det(ds):
     return clim_prob, clim_det
 
 
-def era_stats():
+def era_stats(aggression):
+    if aggression == 0:
+        thresh = -10
+    elif aggression == 1:
+        thresh = 0.01
+    elif aggression == 2:
+        thresh = 0.05
     crps_som = np.empty((N_nodes,len(obs_val.Wind.values)))  # (nodes, forecasts)
     crps_som.fill(np.nan)
     crps_clim = np.empty((N_nodes,len(obs_val.Wind.values)))
@@ -244,7 +252,7 @@ def era_stats():
     for j,d in enumerate(distributions):  # for each node
         # calculate total crpss for each node
         crpss = np.nanmean(1-crps_som[j,:]/crps_clim[j,:])
-        if crpss < 0.05:  # flag indices of 'bad' nodes
+        if crpss < thresh:  # flag indices of 'bad' nodes
             bad_nodes.append(j)
 
 
@@ -262,11 +270,9 @@ def forecast():
                 end += np.timedelta64(6,'h')
     else:
         leads = t_step
-    do = False
-    obsv_loc = obs_test.copy()  # includes nan
 
     if do:
-        files = glob.glob('data/z-gefs/gefs-z-*')
+        files = glob.glob('/users/jpsotka/Nextcloud/z-gefs/gefs-z-*')
         time_axis = pd.date_range(test_period_gefs.start,test_period_gefs.stop,freq=res_str)
         bmus_mems = np.empty((len(time_axis),len(files),len(leads)))
         # bmus_mems = np.empty((int(len(obsv_loc.resample(index='24H').mean().index)),
@@ -279,6 +285,7 @@ def forecast():
         
         for gefs_file in files:  # each member
             mem=int(gefs_file[-5:-3])
+            print('member ',mem)
             # open all of them and calculate best bmus, to get memory out of the way
             # save in a dataset so each validation date has a corresponding distribution
             current_gefs = xr.open_dataset(gefs_file).sel(time=test_period_gefs,isobaricInhPa=level)
@@ -289,12 +296,12 @@ def forecast():
                 # filter gefs by date so that it matches obs date
                 if type(t) == slice:
                     gefs_step = current_gefs.sel(step=t)  
-                    date = slice(obsv_loc.index.values[0]-t.start,obsv_loc.index.values[-1]-t.start)
+                    date = slice(obs_test.index.values[0]-t.start,obs_test.index.values[-1]-t.start)
                     t = t.start
 
                 else:
                     gefs_step = current_gefs.sel(step=[t],method='nearest')
-                    date = slice(obsv_loc.index.values[0]-t,obsv_loc.index.values[-1]-t)
+                    date = slice(obs_test.index.values[0]-t,obs_test.index.values[-1]-t)
 
                 gefs_step = gefs_step.sel(time=date)  # only keep indices with valid obs
 
@@ -304,7 +311,7 @@ def forecast():
                 gefs_step=gefs_step.transpose("time","step","latitude","longitude")  # put time first so that can enumerate thru
                 for kk, st in enumerate(gefs_step):  # for each date
                     date = st.time.values
-                    if date + t in obsv_loc.index.values:
+                    if date + t in obs_test.index.values:
                         st = st - clim.sel(dayofyear=pd.to_datetime(date+t).day_of_year)  # ANOMOLAY STUFF
                         for ii, gh in enumerate(st.gh):  # for each step
                             mem_arr = np.reshape(gh.to_numpy(),(gh.latitude.shape[0]*gh.longitude.shape[0]))
@@ -328,7 +335,15 @@ def forecast():
     mae_list = []
     bias_list = []
     discarded = []
+
+    bmus_mems = np.empty((len(obs_test.index),len(t_step_plot)))
+    bmus_mems.fill(np.nan)
+    stats_xr = xr.Dataset(data_vars=dict(crps=(['index','leadtime'],bmus_mems),bias=(['index','leadtime'],bmus_mems.copy()),
+                                         prob=(['index','leadtime'],bmus_mems.copy()),width=(['index','leadtime'],bmus_mems.copy()),
+                                         width90=(['index','leadtime'],bmus_mems.copy()),width50=(['index','leadtime'],bmus_mems.copy())),
+            coords=dict(index=obs_test.index,leadtime=t_step_plot))
     for tt,t in enumerate(t_step):  # for each lead time
+        obsv_loc = obs_test.copy(deep=True)
         dist_arr = dist_xr.sel(leadtime=t)
         nan_count = 0
         smth = []
@@ -336,17 +351,27 @@ def forecast():
         for kk, ob in enumerate(obsv_loc.Wind):  # for each testing obs
             dist_list=[]
 
-            if np.isnan(ob.values):  # here we skip nan dates
+            if np.isnan(ob.values):  # here we skip nan obs
                 continue
 
             # get bmus from this period and add the distributions
             date = ob.index.values
             if res > 6:
-                for c in dist_arr.sel(index=date-t.start).values.T.squeeze():  # each date in here will have a list of memberS?
-                    if np.count_nonzero(np.isnan(c)) > 0.5*len(dist_xr.member):  # if many of the members are bad nodes
-                        dist_list.append([np.nan])
-                    else:
-                        dist_list.append(np.concatenate([distributions[int(e)] for e in c if ~np.isnan(e)]))
+                if (date-t.start) in dist_arr.index.values:
+                    for c in dist_arr.sel(index=date-t.start).values.T.squeeze():  # each date in here will have a list of memberS?
+                        if np.count_nonzero(np.isnan(c)) > 0.5*len(dist_xr.member):  # if many of the members are bad nodes
+                            dist_list.append([np.nan])
+                        else:
+                            dist_list.append(np.concatenate([distributions[int(e)] for e in c if ~np.isnan(e)]))
+                else:
+                    continue
+                dis_count = 0
+                for l in dist_list:
+                    if np.isnan(l[0]):
+                        dis_count += 1
+                if dis_count > 0.5*len(dist_list):
+                    dist_list = [np.array([np.nan])]
+
             else:
                 if (date-t) in dist_arr.index.values:
                     c = dist_arr.sel(index=date-t).values
@@ -356,6 +381,7 @@ def forecast():
                         dist_list.append(np.concatenate([distributions[int(e)] for e in c if ~np.isnan(e)]))
                 else:
                     continue
+            
             dist_list = np.concatenate(dist_list)
             if np.isnan(dist_list).all():
                 obsv_loc['Wind'][kk] = np.nan
@@ -365,11 +391,14 @@ def forecast():
 
         dists_time = stack_uneven(smth)
         obsv_cut = obsv_loc.dropna(dim='index',how='all')
-        if res < 24:
+        if res == 6:
             obsv_cut = obsv_cut.where(obsv_cut['index.hour']==pd.to_datetime(t.astype('datetime64')).hour, drop=True)
+        elif res == 12:
+            obsv_cut = obsv_cut.where(obsv_cut['index.hour']==pd.to_datetime(t.start.astype('datetime64')).hour, drop=True)
 
         if len(dists_time) != len(obsv_cut.index):
             print('bad things!!!')
+            raise ValueError
             os.abort()
         discarded.append(nan_count / (nan_count + len(dists_time)))
         
@@ -382,12 +411,29 @@ def forecast():
         #crps
         crps_som = np.empty((len(dist_means)))  # (nodes, forecasts)
         crps_som.fill(np.nan)
+        if res > 6:
+            t = t.start
 
         for kk, gh in enumerate(dist_means):  # for each validation date
             ob = obsv_cut.isel(index=kk).Wind  # wind observation for this date
             date = pd.to_datetime(ob.index.values)
 
-            crps_som[kk] =ps.crps_ensemble(ob, dists_time[kk,:])
+            crps_som[kk] =ps.crps_ensemble(ob.values, dists_time[kk,:])
+            stats_xr['crps'].loc[dict(index=date,leadtime=t)]=ps.crps_ensemble(ob.values, dists_time[kk,:])
+            stats_xr['bias'].loc[dict(index=date,leadtime=t)]= dist_means[kk]-ob.values
+
+            dists_nonan = dists_time[kk,:][~np.isnan(dists_time[kk,:])]
+            stats_xr['prob'].loc[dict(index=date,leadtime=t)]= sum(v < ob.values for v in dists_nonan) / len(dists_nonan)
+
+            stats_xr['width'].loc[dict(index=date,leadtime=t)]= np.max(dists_nonan) - np.min(dists_nonan)
+            w95=np.percentile(dists_nonan, 95)
+            w5=np.percentile(dists_nonan, 5)
+            w75=np.percentile(dists_nonan, 75)
+            w25=np.percentile(dists_nonan, 25)
+            dists_90 = dists_nonan[np.where(np.logical_and(dists_nonan>=w5, dists_nonan<=w95))]
+            dists_50 = dists_nonan[np.where(np.logical_and(dists_nonan>=w25, dists_nonan<=w75))]
+            stats_xr['width90'].loc[dict(index=date,leadtime=t)]= np.max(dists_90) - np.min(dists_90)
+            stats_xr['width50'].loc[dict(index=date,leadtime=t)]= np.max(dists_50) - np.min(dists_50)
 
         # correlation between distribution means and obs through time
         try:
@@ -442,11 +488,14 @@ def forecast():
         bias_list.append(bias)
         mae_list.append(mae)
 
+    stats_xr['discarded'] = (['leadtime'],discarded)
+    stats_xr['r'] = (['leadtime'],r_list)
+    stats_xr['mae'] = (['leadtime'],mae_list)
+    stats_xr['bs50'] = (['leadtime'],bs50_list)
+    return stats_xr
 
-    return r_list, mae_list, bias_list, crps_list, bs50_list, discarded
 
-
-def clim_stats():
+def clim_stats(ds):
     obs = obs_test.dropna(dim='index')
 
     nan_arr = np.repeat(np.nan,len(obs.index))
@@ -454,12 +503,39 @@ def clim_stats():
     obs['bias_clim'] = (['index'],nan_arr.copy())
     obs['mae_clim'] = (['index'],nan_arr.copy())
 
+    ds['crps_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+    ds['mae_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+    ds['bias_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+    ds['obs'] = (['index'],obs_test.Wind.values)
+    ds['prob_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+    ds['width_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+    ds['width50_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+    ds['width90_clim'] = (['index'],np.repeat(np.nan,len(obs_test.index)))
+
     for kk, gh in enumerate(obs.index):  # for each obs
         ob = obs.sel(index=gh).Wind.values  # wind observation for this date
         date = pd.to_datetime(gh.values)
         obs['crps_clim'].loc[gh] = ps.crps_ensemble(ob, clim_prob.sel(index=clim_prob.index.hour==date.hour).Wind)
         obs['mae_clim'].loc[gh] = np.abs(clim_det.sel(hour=date.hour).Wind.values-ob)
         obs['bias_clim'].loc[gh] = clim_det.sel(hour=date.hour).Wind.values-ob
+
+        ds['crps_clim'].loc[dict(index=gh)] = ps.crps_ensemble(ob, clim_prob.sel(index=clim_prob.index.hour==date.hour).Wind)
+        ds['mae_clim'].loc[dict(index=gh)] = np.abs(clim_det.sel(hour=date.hour).Wind.values-ob)
+        ds['bias_clim'].loc[dict(index=gh)] = clim_det.sel(hour=date.hour).Wind.values-ob
+
+        dists_nonan = clim_prob.sel(index=clim_prob.index.hour==date.hour).Wind
+        dists_nonan = dists_nonan[~np.isnan(dists_nonan)]
+        #ds['prob_clim'].loc[dict(index=gh)] = sum(v < ob for v in dists_nonan) / len(dists_nonan)
+
+        ds['width_clim'].loc[dict(index=gh)]= np.max(dists_nonan) - np.min(dists_nonan)
+        w95=np.percentile(dists_nonan, 95)
+        w5=np.percentile(dists_nonan, 5)
+        w75=np.percentile(dists_nonan, 75)
+        w25=np.percentile(dists_nonan, 25)
+        dists_90 = dists_nonan[np.where(np.logical_and(dists_nonan>=w5, dists_nonan<=w95))]
+        dists_50 = dists_nonan[np.where(np.logical_and(dists_nonan>=w25, dists_nonan<=w75))]
+        ds['width90_clim'].loc[dict(index=gh)]= np.max(dists_90) - np.min(dists_90)
+        ds['width50_clim'].loc[dict(index=gh)]= np.max(dists_50) - np.min(dists_50)
 
     if res < 24:  # do stack-y things for lead times
         mae_clim = obs['mae_clim'].groupby('index.hour').mean()
@@ -481,14 +557,24 @@ def clim_stats():
         target = np.array(obs.Wind > split)  # boolean array of obs
         prob_clim = np.sum([d>split for d in obs_train.Wind.dropna(dim='index')])/len(obs_train.Wind.dropna(dim='index'))
         brier_clim = brier_score_loss(target, np.repeat(prob_clim,len(target)))  # should be 0.25
-
+    ds['bs50_clim'] = brier_clim
     bs50_clim = np.repeat(brier_clim, len(t_step))
 
-    return mae_clim, bias_clim, crps_clim, bs50_clim
+    return ds
 
 
-def gefs_stats(ds):
+def gefs_stats(ds, st):
     obs = obs_test.dropna(dim='index')
+
+    bmus_mems = np.empty((len(obs_test.index),len(t_step_plot)))
+    bmus_mems.fill(np.nan)
+    st['crps_gefs'] = (['index','leadtime'],bmus_mems)
+    st['bias_gefs'] = (['index','leadtime'],bmus_mems.copy())
+    st['prob_gefs'] = (['index','leadtime'],bmus_mems.copy())
+    st['width_gefs'] = (['index','leadtime'],bmus_mems.copy())
+    st['width90_gefs'] = (['index','leadtime'],bmus_mems.copy())
+    st['width50_gefs'] = (['index','leadtime'],bmus_mems.copy())
+
 
     mae_list = []
     bias_list = []
@@ -518,13 +604,31 @@ def gefs_stats(ds):
             obs_date = date + t
             if obs_date in obs.index.values:
                 ob = obs.sel(index=obs_date).Wind.values
-                crps.append(ps.crps_ensemble(ob, gh.mean(dim='step').values))
-                g_time_series_members.append(gh.mean(dim='step').values)
+                forecast = gh.mean(dim='step').values
+
+                crps.append(ps.crps_ensemble(ob, forecast))
+                st['crps_gefs'].loc[dict(index=obs_date,leadtime=t)] = ps.crps_ensemble(ob, forecast)
+
+                g_time_series_members.append(forecast)
                 gh = gh.mean().values
                 g_time_series.append(gh)
                 ob_time_series.append(ob)
                 mae.append(np.abs(gh-ob))
                 bias.append(gh - ob)
+                st['bias_gefs'].loc[dict(index=obs_date,leadtime=t)] = gh - ob
+
+                dists_nonan = forecast[~np.isnan(forecast)]
+                st['prob_gefs'].loc[dict(index=obs_date,leadtime=t)]= sum(v < ob for v in dists_nonan) / len(dists_nonan)
+
+                st['width_gefs'].loc[dict(index=obs_date,leadtime=t)]= np.max(dists_nonan) - np.min(dists_nonan)
+                w95=np.percentile(dists_nonan, 95)
+                w5=np.percentile(dists_nonan, 5)
+                w75=np.percentile(dists_nonan, 75)
+                w25=np.percentile(dists_nonan, 25)
+                dists_90 = dists_nonan[np.where(np.logical_and(dists_nonan>=w5, dists_nonan<=w95))]
+                dists_50 = dists_nonan[np.where(np.logical_and(dists_nonan>=w25, dists_nonan<=w75))]
+                st['width90_gefs'].loc[dict(index=obs_date,leadtime=t)]= np.max(dists_90) - np.min(dists_90)
+                st['width50_gefs'].loc[dict(index=obs_date,leadtime=t)]= np.max(dists_50) - np.min(dists_50)
         mae_list.append(np.mean(mae))
         bias_list.append(np.mean(bias))
         crps_list.append(np.array(crps))
@@ -533,6 +637,7 @@ def gefs_stats(ds):
         if p_gefs> 0.05:
             r_gefs = np.nan
         r_list.append(r_gefs)
+        
 
         splits = [50]
         bss = []
@@ -543,7 +648,11 @@ def gefs_stats(ds):
             brier = brier_score_loss(target, prob)
         bs50_list.append(brier)
 
-    return mae_list, bias_list, r_list, crps_list, bs50_list
+    st['r_gefs'] = (['leadtime'],r_list)
+    st['mae_gefs'] = (['leadtime'],mae_list)
+    st['bs50_gefs'] = (['leadtime'],bs50_list)
+
+    return st
             
 
 
@@ -563,7 +672,6 @@ def plot_error(som_error, clim_error, gefs_error, ltimes):
     ax.legend(fontsize=12)
     plt.tight_layout()
     plt.show()
-    plt.savefig('plots/crps-summer-6h.png')
 
     return None
 
@@ -584,11 +692,11 @@ def plot_rel_error(som_error, clim_error, gefs_error, ltimes):
     ax.xaxis.grid(True,which='both',linestyle='--')
     ax.legend(fontsize=12)
     plt.tight_layout()
-    plt.savefig('plots/crps-summer-24h.png')
 
     return None
 
-def box_plots(som_error, gefs_error, clim_error, ltimes):
+
+def box_plots(som_error,gefs_error, ltimes):
     ltimes = np.array(ltimes,dtype=np.float64)
     ltimes = ltimes / (24*60*60*1e9)
 
@@ -597,27 +705,63 @@ def box_plots(som_error, gefs_error, clim_error, ltimes):
     ax.set_xlabel('Lead time (days)')
     ax.set_ylabel('CRPSS')
 
-    ax.boxplot(1-som_error[0]/clim_error[0],positions=[ltimes[0]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[1]/clim_error[0],positions=[ltimes[1]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[2]/clim_error[0],positions=[ltimes[2]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[3]/clim_error[0],positions=[ltimes[3]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[4]/clim_error[0],positions=[ltimes[4]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[5]/clim_error[0],positions=[ltimes[5]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[6]/clim_error[0],positions=[ltimes[6]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[7]/clim_error[0],positions=[ltimes[7]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    ax.boxplot(1-som_error[8]/clim_error[0],positions=[ltimes[8]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
-    
-    ax.boxplot(1-gefs_error[0]/clim_error[0],positions=[ltimes[0]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[1]/clim_error[0],positions=[ltimes[1]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[2]/clim_error[0],positions=[ltimes[2]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[3]/clim_error[0],positions=[ltimes[3]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[4]/clim_error[0],positions=[ltimes[4]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[5]/clim_error[0],positions=[ltimes[5]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[6]/clim_error[0],positions=[ltimes[6]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[7]/clim_error[0],positions=[ltimes[7]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
-    ax.boxplot(1-gefs_error[8]/clim_error[0],positions=[ltimes[8]+0.2],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
+    for l in range(len(som_error.leadtime)):
+        ax.boxplot(som_error.isel(leadtime=l).dropna(dim='index'),positions=[ltimes[l]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
+        ax.boxplot(gefs_error.isel(leadtime=l).dropna(dim='index'),positions=[ltimes[l]+0.18],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
+
+
     ax.set_xticks(range(6,16))
     ax.set_xticklabels(range(6,16))
+
+    plt.show()
+
+    print('Done')
+
+
+def box_plots_6(som_error, gefs_error, ltimes):
+    ltimes = np.array(ltimes,dtype=np.float64)
+    ltimes = ltimes / (24*60*60*1e9)
+    ml = mticker.MultipleLocator(0.5)
+
+    fig, axes = plt.subplots(4,1,figsize=(5,6),sharex=True,gridspec_kw = {'hspace':0.2})
+
+    for i , ax in enumerate(axes):
+        ax.axhline(y=0,c='black',linewidth=1,zorder=1)
+        if i == 3:
+            ax.set_xlabel('Lead time (days)')
+        ax.set_ylabel('CRPSS')
+
+        for l in range(int(len(som_error.leadtime)/4)):
+            ax.boxplot(som_error.isel(leadtime=(l*4+i)).dropna(dim='index'),positions=[ltimes[l*4+i]-0.1],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
+            ax.boxplot(gefs_error.isel(leadtime=(l*4+i)).dropna(dim='index'),positions=[ltimes[l*4+i]+0.1],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
+
+        ax.set_xticks(range(6,16))
+        ax.set_xticklabels(range(6,16))
+        ax.set_yticks(np.arange(-1,1.1,1))
+        ax.set_yticklabels(np.arange(-1,1.1,1))
+        ax.set_ylim(bottom=-2)
+        ax.yaxis.set_minor_locator(ml)
+
+    plt.show()
+
+    print('Done')
+
+
+def violin_plots(ds, ltimes):
+    ltimes = np.array(ltimes,dtype=np.float64)
+    ltimes = ltimes / (24*60*60*1e9)
+
+    ds = ds.to_dataframe()
+
+    ds = pd.melt(ds,value_vars=['crpss','crpss_gefs'],ignore_index=False).reset_index()
+
+    violin(data=ds,x='leadtime',hue='variable',y='value',split=True,gap=0.1,inner='quart')
+
+
+    plt.show()
+
+    print('Done')
+
 
 def plot_discarded(ds,ltimes):
     ltimes = np.array(ltimes,dtype=np.float64)
@@ -630,25 +774,85 @@ def plot_discarded(ds,ltimes):
     ax.set_xticks(range(6,16))
     ax.xaxis.grid(True,which='both',linestyle='--')
     plt.tight_layout()
-    plt.savefig('plots/crps-summer-6h-discarded.png')
+    #plt.savefig('plots/crps-summer-6h-discarded.png')
+
+
+def pit(ds,ltimes):
+    ltimes = np.array(ltimes,dtype=np.float64)
+    ltimes = ltimes / (24*60*60*1e9)
+
+    fig, axes = plt.subplots(nrows=3, ncols=math.ceil(len(ltimes)/3), figsize=(7,5),sharey=True,
+                             gridspec_kw = {'wspace':0.3, 'hspace':0.7})
+    
+    for i, ax in enumerate(axes.flatten()):
+        if i < len(ltimes):
+            probs = ds['prob'].isel(leadtime=i)[~np.isnan(ds['prob'].isel(leadtime=i))]
+            
+            ax.hist(probs,bins=np.arange(0,1.1,0.1),weights=(np.zeros_like(probs) + 1./probs.size)*100,edgecolor='black')
+            ax.set_xticks(np.arange(0,1.1,0.1))
+            ax.set_yticks(np.arange(0,22,5))
+            ax.tick_params(axis='x',labelrotation=45,labelsize=8,pad=1)
+            ax.tick_params(axis='y',labelsize=9,pad=1)
+            ax.set_title(str(round(ltimes[i])),fontsize=10)
+            ax.axhline(y=10,c='black',linewidth=0.8,linestyle='--')
+
+    return None
+
+
+def sharpness(ds,ltimes):
+    ltimes = np.array(ltimes,dtype=np.float64)
+    ltimes = ltimes / (24*60*60*1e9)
+
+    fig, ax = plt.subplots(figsize=(7,4))
+    ax.axhline(y=ds['width50_clim'].isel(index=0).values,c='black',linewidth=1,zorder=1)
+    ax.set_xlabel('Lead time (days)')
+    ax.set_ylabel('Width (m/s)')
+
+    for l in range(len(ltimes)):
+        ax.boxplot(ds['width50'].isel(leadtime=l).dropna(dim='index'),positions=[ltimes[l]],patch_artist=True,showfliers=False,medianprops=dict(color='red'))
+        ax.boxplot(ds['width50_gefs'].isel(leadtime=l).dropna(dim='index'),positions=[ltimes[l]+0.18],patch_artist=True,showfliers=False,boxprops=dict(facecolor='pink'),medianprops=dict(color='red'))
+
+    ax.set_xticks(range(6,16))
+    ax.set_xticklabels(range(6,16))
+
+    plt.show()
+
+    print('Done')
+
+    return None
+
+
+def do_plots(ds):
+    crpss = 1 - ds['crps']/ds['crps_clim']
+    crpss_gefs = 1 - ds['crps_gefs']/ds['crps_clim']
+
+    pit(ds,t_step_plot)
+
+    box_plots(crpss,crpss_gefs,t_step_plot)
+    violin_plots(xr.merge([crpss.to_dataset(name='crpss'),crpss_gefs.to_dataset(name='crpss_gefs')]),t_step_plot)
+
+
+    return None
 
 
 
 if __name__ == '__main__':
-    res = 24 # time resolution in hours
+    res = 6 # time resolution in hours
     res_str = str(res)+'h'
     train_period=slice("2009-10-01","2020-09-23")
     val_period = slice("2020-10-01","2022-03-31")
-    test_period_gefs = slice("2020-09-24","2022-03-25")#slice("2022-03-25","2024-03-25")  # 6 days earlier so that dates line up
-    test_period = slice("2020-10-01","2022-03-31")#slice("2022-04-01","2024-04-01")
+    test_period_gefs = slice("2022-03-25","2024-03-25")  # 6 days earlier so that dates line up
+    test_period = slice("2022-04-01","2024-04-01")
     seas = 'JJA'
-    level = 1000
+    level = 850
+    do = False
+    agg = 1
 
     # setup
-    Nx = 8
-    Ny = 2
+    Nx = 5
+    Ny = 5
     N_nodes = Nx * Ny
-    title = str(res)+'h-8x2-summer'
+    title = '24h-'+seas+'-'+str(level)+'-final'
     lat_offset = 11
     lon_offset = 20
     lat = np.arange(55-lat_offset,55+lat_offset+0.5,0.5)[::-1]
@@ -656,18 +860,43 @@ if __name__ == '__main__':
 
     # this is for lead time. if res > 6H, t_step is slice so that we pick up multiple z forecasts
     t_step = []
-    for d in range(6,15): # each day in week 2
-        if res == 24:
-            t_step.append(slice(np.array(int((d*24+3)*1e9*60*60),dtype='timedelta64[ns]'),  # adding 3 hours for index shift
-                                np.array(int(((d+0.9)*24+3)*1e9*60*60),dtype='timedelta64[ns]')))
-        elif res == 6:
-            t_step.append(np.array(int(d*24*1e9*60*60),dtype='timedelta64[ns]'))
-            t_step.append(np.array(int((d*24+6)*1e9*60*60),dtype='timedelta64[ns]'))
-            t_step.append(np.array(int((d*24+12)*1e9*60*60),dtype='timedelta64[ns]'))
-            t_step.append(np.array(int((d*24+18)*1e9*60*60),dtype='timedelta64[ns]'))
-        else:
-            print('only configured for 6h and 24 resolutions right now')
-            raise ValueError
+    if res <= 24:
+        for d in range(6,15): # each day in week 2
+            if res == 24:
+                t_step.append(slice(np.array(int((d*24)*1e9*60*60),dtype='timedelta64[ns]'), 
+                                    np.array(int(((d+0.9)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+            elif res == 12:
+                t_step.append(slice(np.array(int((d*24)*1e9*60*60),dtype='timedelta64[ns]'), 
+                                    np.array(int(((d+0.48)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+                t_step.append(slice(np.array(int(((d+0.5)*24)*1e9*60*60),dtype='timedelta64[ns]'),  
+                                    np.array(int(((d+0.9)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+            elif res == 6:
+                t_step.append(np.array(int(d*24*1e9*60*60),dtype='timedelta64[ns]'))
+                t_step.append(np.array(int((d*24+6)*1e9*60*60),dtype='timedelta64[ns]'))
+                t_step.append(np.array(int((d*24+12)*1e9*60*60),dtype='timedelta64[ns]'))
+                t_step.append(np.array(int((d*24+18)*1e9*60*60),dtype='timedelta64[ns]'))
+            else:
+                print('only configured for 6h, 12h, and 24h right now')
+                raise ValueError
+    elif res == 48:
+        t_step.append(slice(np.array(int((7*24)*1e9*60*60),dtype='timedelta64[ns]'),  # day 7,8
+                                np.array(int(((8+0.9)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+        t_step.append(slice(np.array(int((9*24)*1e9*60*60),dtype='timedelta64[ns]'),  # day 9,10
+                                np.array(int(((10+0.9)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+        t_step.append(slice(np.array(int((11*24)*1e9*60*60),dtype='timedelta64[ns]'),  # day 11,12
+                                np.array(int(((12+0.9)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+        t_step.append(slice(np.array(int((13*24)*1e9*60*60),dtype='timedelta64[ns]'),  # day 13,14
+                                np.array(int(((14+0.9)*24)*1e9*60*60),dtype='timedelta64[ns]')))
+    else:
+        print('Invalid resolution')
+        raise ValueError
+    
+    t_step_plot = []
+    if res > 6:
+        for l in t_step:
+            t_step_plot.append(l.start)
+    else:
+        t_step_plot = t_step
 
     # obs data
     print('Prepping data...')
@@ -685,11 +914,11 @@ if __name__ == '__main__':
 
     # open som and dists
     print('Opening map and doing forecast...')
-    with open('trained-map-6h-'+title[4:],'rb') as handle:
+    with open('trained-map-'+title[4:]+'.pkl','rb') as handle:
         som = pickle.load(handle)
     indices = np.arange(N_nodes).reshape(Nx,Ny).T.flatten()
 
-    with open('distributions-6h-'+title[4:],'rb') as handle:
+    with open('distributions-'+title[4:]+'.pkl','rb') as handle:
         distributions = pickle.load(handle)
 
     #plot_som(Nx, Ny, som.z_raw, indices)
@@ -697,7 +926,10 @@ if __name__ == '__main__':
 
 
     # era data (used for validation - finding bad nodes)
-    era = xr.open_dataset('era-2009-2022-a.nc').sel(level=level,latitude=lat,longitude=lon-360)
+    if level == 850:
+        era = xr.open_dataset('era-850-2009-2022.nc').sel(latitude=lat,longitude=lon-360)
+    else:
+        era = xr.open_dataset('era-2009-2022-a.nc').sel(latitude=lat,longitude=lon-360,level=level)
     erav = era.sel(time=val_period)
     print('Processing data...')
     # taking out all (spatial and temporal) anomaly
@@ -714,27 +946,21 @@ if __name__ == '__main__':
     erav = erav.sel(time=obs_val.index.values)  # only keep indices with valid obs
 
     # do forecasting, stats
-    bad_nodes = era_stats()
+    bad_nodes = era_stats(agg)
 
-    r, mae, bias, crps, bs50, discarded = forecast()
+    stats_all = forecast()
 
     print('Getting gefs stats...')
-    gefs = xr.open_dataset('data/gefs-wind-all-interpolated.nc').sel(time=test_period_gefs)
+    gefs = xr.open_dataset('~/Nextcloud/thesis/gefs-wind-all-interpolated.nc').sel(time=test_period_gefs)
     gefs = resample_mean(gefs,'gefs-wind',res) # resampled in the 'step' dimension
-    mae_gefs, bias_gefs, r_gefs, crps_gefs, bs50_gefs = gefs_stats(gefs)
+    stats_all = gefs_stats(gefs,stats_all)
 
     print('Doing clim stats')
-    mae_clim, bias_clim, crps_clim, bs50_clim = clim_stats()
-
-    t_step_plot = []
-    if res > 6:
-        for l in t_step:
-            t_step_plot.append(l.start)
-    else:
-        t_step_plot = t_step
+    stats_all = clim_stats(stats_all)
     #plot_discarded(discarded,t_step_plot)
 
-    plot_rel_error(crps,crps_clim,crps_gefs,t_step_plot)
+    #box_plots(crps,crps_clim,crps_gefs,t_step_plot)
+    do_plots(stats_all)
 
     print('Done')
 
