@@ -1,4 +1,4 @@
-# deal with gefs reanalysis grib
+# some functions to merge gefs members into one file, interpolate gefs wind forecast to wind farm
 
 import numpy as np
 import xarray as xr
@@ -7,12 +7,13 @@ import glob
 import sys
 from scipy import interpolate
 from matplotlib import pyplot as plt
+import sys
 
 
 def main():
     # keep this for the bash script for reforecast
     year, month = sys.argv[1:3]
-    filepath = '/users/jpsotka/repos/week2-wind/data/gh-reanalysis-'+year+'-'+month+'-*.nc'
+    filepath = pathname+'gh-reanalysis-'+year+'-'+month+'-*.nc'
     files = glob.glob(filepath)
 
     ds = xr.load_dataset(files[0])
@@ -46,7 +47,7 @@ def z_merge_levels(member):
 
 def gefs_z_merge(member):
     member = str(member)
-    filepath = '/users/jpsotka/repos/week2-wind/data/gefs-z-*-'+member+'.nc'
+    filepath = pathname+'gefs-z-*-'+member+'.nc'
     files = glob.glob(filepath)
 
     ds = xr.load_dataset(files[0])
@@ -68,15 +69,15 @@ def gefs_z_merge(member):
     if glob.glob(filename):
         print('successful save. deleting files..')
 
-        # for f in files:
-        #     os.remove(f)
+        for f in files:
+            os.remove(f)
 
     return None
 
 
 def gefs_wind_merge(member):
     member = str(member)
-    filepath = '/users/jpsotka/repos/week2-wind/data/gefs-wind-*-'+member+'.nc'
+    filepath = pathname+'gefs-wind-*-'+member+'.nc'
     files = glob.glob(filepath)
 
     ds = xr.load_dataset(files[0])
@@ -116,7 +117,7 @@ def gefs_z_merge_members():
 
 
 def gefs_wind_merge_members():
-    filepath = '/users/jpsotka/repos/week2-wind/data/gefs-wind-*-interpolated.nc'
+    filepath = pathname+'gefs-wind-*-interpolated.nc'
     files = glob.glob(filepath)
     files.sort()
     if len(files) <= 1:
@@ -154,10 +155,8 @@ def gefs_wind_merge_members():
             ds1 = ds1.drop_vars(['valid_time'])
         except:
             None
-        if type(mem) == int:
-            ds = xr.concat([ds,ds1],dim="member")
-        else:
-            ds = xr.concat([ds1,ds],dim="time")
+        ds = xr.concat([ds,ds1],dim="member")
+
 
     ds.to_netcdf('data/gefs-wind-all-interpolated-a.nc')
 
@@ -165,7 +164,7 @@ def gefs_wind_merge_members():
 
 def gefs_wind_interpolate(member):
     member = str(member)
-    filepath = '/users/jpsotka/repos/week2-wind/data/gefs-wind-*-'+member+'.nc'
+    filepath = pathname+'gefs-wind-*-'+member+'.nc'
     files = glob.glob(filepath)
 
     if len(files) > 1:
@@ -175,11 +174,11 @@ def gefs_wind_interpolate(member):
     ds = xr.load_dataset(files[0])
 
     # horizontal interpolation
-    coords = np.array([[ds.latitude.values[0],ds.longitude.values[0]],  # (56,239.5)
+    coords = np.array([[ds.latitude.values[0],ds.longitude.values[0]], 
                        [ds.latitude.values[0],ds.longitude.values[1]],
                        [ds.latitude.values[1],ds.longitude.values[0]],
                        [ds.latitude.values[1],ds.longitude.values[1]]])
-    loc = np.array([55.6986, 360-120.4306])  # insert lat/lon of wind farm
+    loc = np.array([, 360-])  # insert lat/lon of wind farm
     u = np.array([ds.u.isel(latitude=0,longitude=0),
                        ds.u.isel(latitude=0,longitude=1),
                        ds.u.isel(latitude=1,longitude=0),
@@ -206,10 +205,12 @@ def gefs_wind_interpolate(member):
 
 
 if __name__ == "__main__":
+    pathname = "/Users/jpsotka/repos/week2-wind/data/"  # change this
+    #member = int(sys.argv[1])
     #z_merge_levels(12)
-    gefs_z_merge(17)
+    #gefs_wind_merge(member)
     #gefs_z_merge(18)
     #gefs_z_merge_members()
-    #gefs_wind_interpolate(9)
-    #gefs_wind_interpolate(10)
-    #gefs_wind_merge_members()
+    gefs_wind_interpolate(14)
+    gefs_wind_merge_members()
+    print('done')

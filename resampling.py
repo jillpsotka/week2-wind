@@ -99,10 +99,10 @@ def resample_mean(ds, type_str,res=6):
     # resample 5-minute obs data
     # res is number of hours per resampling period
     #origin = int((res / 2) % 24)  # modulus makes it work when res is >24
-    if res == 6:
+    if res == 6 or res == 12:
         origin = 0  # 10am - 4pm PST for 6-h
     else:
-        origin = 3  # 7pm - 7am PST
+        origin = 0  # 7pm - 7am PST
 
     res_str = str(res) + 'H'
     if type_str == 'obs':  # separate this cuz obs are 5-minute and era is 1-hr
@@ -111,7 +111,7 @@ def resample_mean(ds, type_str,res=6):
         ds = ds.resample(index=res_str,origin=datetime(2007,12,1,origin)).mean()
     elif type_str == 'era':
         ds = ds.resample(time=res_str,origin=datetime(2007,12,1,origin)).mean()
-    elif type_str == 'gefs':  # jill check
+    elif type_str == 'gefs':
         ds10 = ds.sel(step=slice(np.array(int(9.75*24*1e9*60*60),dtype='timedelta64[ns]'),  # after day 10
                                 np.array(int(16*24*1e9*60*60),dtype='timedelta64[ns]')))
         ds = ds.sel(step=slice(np.array(int(5*24*1e9*60*60),dtype='timedelta64[ns]'),  # up to day 10
@@ -134,7 +134,15 @@ def resample_mean(ds, type_str,res=6):
         ds = ds.resample(step='6H',origin=datetime(2007,12,1,origin)).last()
         ds['step'] = ds.step.values.astype('timedelta64[ns]')
         #ds['time'] = ds.time.values + np.timedelta64(origin,'h')  # time stuff is weird
+
     elif type_str == 'gefs-wind':
+        if res == 168:
+            ds['step'] = ds.step.values.astype('datetime64[ns]')
+            ds = ds.wind.rolling(step=54,center=True,min_periods=40).mean()
+            ds = ds.dropna(dim='step',how='all')
+            ds = ds.resample(step=res_str).reduce(findMiddle)
+            ds['step'] = ds.step.values.astype('timedelta64[ns]')
+            return ds
         # i think split things into before day 10 and after to simplify rolling stuff?
         ds10 = ds.sel(step=slice(np.array(int(9.75*24*1e9*60*60),dtype='timedelta64[ns]'),  # after day 10
                                 np.array(int(16*24*1e9*60*60),dtype='timedelta64[ns]')))
@@ -147,7 +155,7 @@ def resample_mean(ds, type_str,res=6):
         ds['step'] = ds.step.values.astype('datetime64[ns]')
         # using a custom map mean function
         weight = xr.DataArray(weights, dims=['window'])
-        ds = ds.wind.rolling(step=len(weight),center=True,min_periods=res/(3*2)).construct('window').dot(weight)  # take weighted rolling averages
+        ds = ds.wind.rolling(step=len(weight),center=True,min_periods=int(res/(3*2))).construct('window').dot(weight)  # take weighted rolling averages
         ds = ds.dropna(dim='step',how='all')
 
         weights = np.ones(int((res/6)+1))

@@ -98,19 +98,19 @@ def wind_distributions(bmus):
 if __name__ ==  "__main__":
     # setup
     print('starting',datetime.now())
-    Nx = 5
-    Ny = 5
+    Nx = 15
+    Ny = 2
 
-    seas = 'JJA'
-    levels = [850]
-    lat_dif = [11]  # domain size (degrees on each side of the center)
-    lon_dif = [20]
+    seas = 'DJF'
+    levels = [1000]
+    lat_dif = [9]  # domain size (degrees on each side of the center)
+    lon_dif = [16]
 
     title = seas + '-' + str(levels[0])
 
     res = 6  # time resolution of map in hours, always 6
     anomaly = True  # get rid of seasonal anomaly
-    train_period=slice("2009-10-01","2020-09-23")
+    train_period=slice("2009-10-01","2020-10-01")
 
     print('Loading data...')
 
