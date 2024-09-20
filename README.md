@@ -1,7 +1,7 @@
 # week2-wind
 Masters thesis research!!
 
-Improving week-2 hub height wind forecasts using upper-level nwp outputs + self-organizing maps to extrapolate down to hub height. Thesis: (insert link to thesis once published)
+Improving week-2 hub height wind forecasts using upper-level nwp outputs + self-organizing maps to extrapolate down to hub height. Thesis: [link](https://open.library.ubc.ca/soa/cIRcle/collections/ubctheses/24/items/1.0445419) 
 
 ## 1. Required data
 - ERA5 geopotential at desired levels (500,700,850,1000 hPa) for training & validation period
